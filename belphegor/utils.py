@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Iterable
 
@@ -10,6 +11,12 @@ from rich.console import Console
 from rich.table import Table
 
 console = Console()
+
+# gobuster usa el logger estándar de Go para sus mensajes fatales (p.ej. el
+# aviso de precheck de wildcard), que siempre vienen prefijados con
+# "YYYY/MM/DD HH:MM:SS ". Nunca es un hallazgo, así que lo tratamos como ruido
+# en parse_gobuster_line.
+_GOBUSTER_LOG_PREFIX = re.compile(r"^\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}\b")
 
 
 def print_results_table(results: list[dict], title: str = "Resultados") -> None:
@@ -103,6 +110,9 @@ def parse_gobuster_line(line: str, mode: str) -> dict | None:
     if not stripped:
         return None
 
+    if _GOBUSTER_LOG_PREFIX.match(stripped):
+        return None
+
     # Líneas de progreso/infra de gobuster que no son hallazgos.
     noise_prefixes = (
         "=", "Gobuster", "[+]", "[*]", "Progress:", "Starting", "Finished",
@@ -146,6 +156,21 @@ def parse_gobuster_line(line: str, mode: str) -> dict | None:
             pass
 
     return item
+
+
+def is_wildcard_precheck_error(line: str) -> bool:
+    """True si la línea es el error fatal de gobuster por precheck de wildcard.
+
+    Antes de arrancar, gobuster le pega a una URL random para ver si el
+    target devuelve el mismo status/tamaño para cualquier cosa (catch-all
+    403, WAF, vhost comodín, etc.). Si es así, aborta con este mensaje en vez
+    de escanear — y sin esto, esa línea se cuela como un hallazgo trucho.
+    """
+    lowered = line.lower()
+    return (
+        "the server returns a status code that matches" in lowered
+        or "please exclude the response length or the status code" in lowered
+    )
 
 
 def iter_nonempty(lines: Iterable[str]) -> Iterable[str]:

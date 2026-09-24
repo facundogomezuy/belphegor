@@ -22,7 +22,12 @@ from rich.console import Console
 from rich.panel import Panel
 
 from ..preflight import Target, build_target, ensure_tool, TargetError
-from ..utils import parse_gobuster_line, print_results_table, save_results
+from ..utils import (
+    is_wildcard_precheck_error,
+    parse_gobuster_line,
+    print_results_table,
+    save_results,
+)
 
 console = Console()
 
@@ -266,6 +271,7 @@ def _stream_gobuster(cmd: list[str], mode: str) -> list[dict]:
     para no dejar procesos colgados.
     """
     results: list[dict] = []
+    fatal_line: Optional[str] = None
     proc: Optional[subprocess.Popen] = None
     try:
         proc = subprocess.Popen(
@@ -281,6 +287,13 @@ def _stream_gobuster(cmd: list[str], mode: str) -> list[dict]:
         for line in proc.stdout:
             line = line.rstrip("\n")
             if not line.strip():
+                continue
+            if is_wildcard_precheck_error(line):
+                # gobuster aborta: el target devuelve el mismo status/tamaño
+                # para una URL inexistente (catch-all 403, WAF, vhost
+                # comodín...). No es un hallazgo, es el motivo del fracaso.
+                fatal_line = line.strip()
+                console.print(f"  [bold red]![/bold red] {line}")
                 continue
             parsed = parse_gobuster_line(line, mode)
             if parsed is not None:
@@ -299,6 +312,25 @@ def _stream_gobuster(cmd: list[str], mode: str) -> list[dict]:
         raise TargetError("gobuster no se pudo ejecutar (¿está en el PATH?).")
     finally:
         _kill(proc)
+
+    if fatal_line is not None:
+        raise TargetError(
+            "el target devuelve el mismo status/tamaño para una URL "
+            "inexistente al azar (típico de un catch-all 403, un WAF, o un "
+            "vhost comodín) — gobuster abortó el precheck de wildcard antes "
+            "de escanear en serio.\n"
+            f"    Detalle de gobuster: {fatal_line}\n"
+            "    Probá:\n"
+            "      - excluir ese status con -b/--status-exclude (ej: 403,404)\n"
+            "      - confirmar a mano con curl si es un WAF o el 403 es real"
+        )
+
+    returncode = proc.returncode if proc is not None else None
+    if returncode not in (0, None) and not results:
+        console.print(
+            f"[yellow][~] gobuster terminó con código {returncode} y no hubo "
+            f"hallazgos parseables — revisá el output de arriba.[/yellow]"
+        )
 
     return results
 
