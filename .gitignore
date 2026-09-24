@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# Instalación editable
+*.egg-link
+pip-wheel-metadata/
+
+# Salidas de escaneos (no subir resultados de targets)
+*.out
+belphegor_out.*
+results/
+output/
+
+# Editores / SO
+.idea/
+.vscode/
+*.swp
+.DS_Store
