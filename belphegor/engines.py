@@ -35,8 +35,14 @@ class Scanner(ABC):
         return shutil.which(self.tool) is not None
 
     @abstractmethod
-    def build_command(self, cfg: "EnumConfig", wordlist: str) -> list[str]:
-        """Arma la lista de argumentos para subprocess según la config."""
+    def build_command(
+        self, cfg: "EnumConfig", wordlist: str, base_url: Optional[str] = None
+    ) -> list[str]:
+        """Arma la lista de argumentos para subprocess según la config.
+
+        `base_url` sobreescribe la URL objetivo (modo dir): lo usa la recursión
+        para escanear dentro de un subdirectorio encontrado.
+        """
 
     @abstractmethod
     def parse_line(self, line: str, mode: str) -> Optional[Finding]:
@@ -130,12 +136,14 @@ class GobusterScanner(Scanner):
     name = "gobuster"
     tool = "gobuster"
 
-    def build_command(self, cfg: "EnumConfig", wordlist: str) -> list[str]:
+    def build_command(
+        self, cfg: "EnumConfig", wordlist: str, base_url: Optional[str] = None
+    ) -> list[str]:
         cmd: list[str] = ["gobuster", cfg.mode]
 
         if cfg.mode == "dir":
             assert cfg._resolved_target is not None
-            cmd += ["-u", cfg._resolved_target.url]
+            cmd += ["-u", base_url or cfg._resolved_target.url]
         elif cfg.mode == "vhost":
             assert cfg._resolved_target is not None
             cmd += ["-u", cfg._resolved_target.url, "--append-domain"]

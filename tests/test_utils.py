@@ -6,7 +6,9 @@ from belphegor.models import Finding
 from belphegor.utils import (
     _status_style,
     detect_wildcard,
+    is_interesting,
     iter_jsonl,
+    mark_interesting,
     save_results,
     split_wildcard_noise,
 )
@@ -89,6 +91,26 @@ def test_save_jsonl_a_archivo(tmp_path):
     lineas = dest.read_text().strip().split("\n")
     assert len(lineas) == 2
     assert json.loads(lineas[1])["path"] == "/b"
+
+
+# --------------------------------------------------------------------------- #
+# Hallazgos jugosos
+# --------------------------------------------------------------------------- #
+def test_is_interesting():
+    assert is_interesting("/admin")
+    assert is_interesting("/.git/config")
+    assert is_interesting("/backup.zip")
+    assert is_interesting("/api/v1/users")
+    assert is_interesting("/WP-Admin")  # case-insensitive
+    assert not is_interesting("/imagen.png")
+    assert not is_interesting("/about")
+
+
+def test_mark_interesting():
+    res = [_f("200", "1", "/admin"), _f("200", "2", "/about")]
+    mark_interesting(res)
+    assert res[0].interesting is True
+    assert res[1].interesting is False
 
 
 def test_save_json_incluye_meta(tmp_path):

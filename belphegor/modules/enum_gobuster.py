@@ -23,6 +23,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
@@ -31,7 +32,13 @@ from .._console import err
 from ..engines import Scanner, get_scanner
 from ..models import Finding
 from ..preflight import Target, build_target, ensure_tool, TargetError
-from ..utils import iter_jsonl, render_results, save_results, split_wildcard_noise
+from ..utils import (
+    iter_jsonl,
+    mark_interesting,
+    render_results,
+    save_results,
+    split_wildcard_noise,
+)
 
 MODES = ("dir", "vhost", "dns")
 
@@ -117,6 +124,8 @@ class EnumConfig:
     verbose: bool = False                 # -v: imprimir cada hallazgo en vivo (CTF)
     engine: str = "gobuster"             # --engine: motor de escaneo
     stdout_json: bool = False            # emitir JSONL por stdout (pipe / --json)
+    recursive: bool = False               # -r: recursar en directorios (solo dir)
+    depth: int = 2                        # --depth: profundidad máxima de recursión
     _resolved_target: Optional[Target] = field(default=None, repr=False)
 
 
@@ -211,27 +220,41 @@ def run(cfg: EnumConfig, interactive: bool = False) -> list[Finding]:
             f"martillar el target.[/yellow]"
         )
 
-    cmd = scanner.build_command(cfg, wordlist)
-    err.print(f"[dim]$ {' '.join(cmd)}[/dim]\n")
+    # 5. Ejecución: recursiva (solo dir) o de una pasada.
+    cmd: Optional[list[str]] = None
+    if cfg.recursive and cfg.mode == "dir":
+        results = _run_recursive(scanner, cfg, wordlist)
+        recursive_run = True
+    else:
+        if cfg.recursive:
+            err.print("[yellow][~] --recursive solo aplica en modo dir; lo ignoro.[/yellow]")
+        cmd = scanner.build_command(cfg, wordlist)
+        err.print(f"[dim]$ {' '.join(cmd)}[/dim]\n")
+        results = _stream_scan(scanner, cmd, cfg.mode, verbose=cfg.verbose)
+        recursive_run = False
 
-    results = _stream_scan(scanner, cmd, cfg.mode, verbose=cfg.verbose)
+    # 6. Marcar hallazgos jugosos (Fase 5: inteligencia sobre resultados).
+    mark_interesting(results)
 
-    # 5. Presentación + manejo de comodín.
+    # 7. Presentación + manejo de comodín.
     if cfg.stdout_json:
         _, _, wildcard = split_wildcard_noise(results)
-        if wildcard is not None and cfg.auto_filter:
+        if wildcard is not None and cfg.auto_filter and not recursive_run:
             results = _rerun_filtered(scanner, cfg, cmd, wildcard)
+            mark_interesting(results)
             _, _, wildcard = split_wildcard_noise(results)
         _emit_jsonl(results)
         if wildcard is not None:
-            _warn_wildcard(cfg, cmd, wildcard)
+            _warn_wildcard(wildcard, cmd)
     else:
         err.print()
         _, _, wildcard = render_results(results, title="Hallazgos")
-        if wildcard is not None:
+        if wildcard is not None and not recursive_run:
             results = _handle_wildcard_filter(scanner, cfg, cmd, results, wildcard, interactive)
+        elif wildcard is not None:
+            _warn_wildcard(wildcard, None)
 
-    # 6. Guardado a archivo (si corresponde).
+    # 8. Guardado a archivo (si corresponde).
     _handle_output(cfg, results, interactive, wordlist)
 
     return results
@@ -244,16 +267,22 @@ def _emit_jsonl(results: list[Finding]) -> None:
     sys.stdout.flush()
 
 
-def _warn_wildcard(cfg: EnumConfig, cmd: list[str], wildcard: dict) -> None:
+def _warn_wildcard(wildcard: dict, cmd: Optional[list[str]]) -> None:
     """Aviso de comodín por stderr (no ensucia el JSONL de stdout)."""
     pct = round(wildcard["fraction"] * 100)
-    sugerencia = " ".join(cmd + ["--exclude-length", str(wildcard["size"])])
-    err.print(
+    base = (
         f"[yellow][~][/yellow] Probable comodín: {wildcard['count']} resultados con "
-        f"status {wildcard['status']} · size {wildcard['size']} ({pct}%). "
-        f"Filtralos con: [bold]{sugerencia}[/bold] "
-        f"[dim](o --auto-filter)[/dim]"
+        f"status {wildcard['status']} · size {wildcard['size']} ({pct}%)."
     )
+    if cmd is not None:
+        sugerencia = " ".join(cmd + ["--exclude-length", str(wildcard["size"])])
+        base += f" Filtralos con: [bold]{sugerencia}[/bold] [dim](o --auto-filter)[/dim]"
+    else:
+        base += (
+            f" Volvé a correr con [bold]--exclude-length {wildcard['size']}[/bold] "
+            f"[dim](o --auto-filter)[/dim] para filtrarlos."
+        )
+    err.print(base)
 
 
 def _rerun_filtered(
@@ -317,6 +346,89 @@ def _handle_wildcard_filter(
         f"    [dim](o pasá --auto-filter para que belphegor lo haga solo)[/dim]"
     )
     return results
+
+
+# --------------------------------------------------------------------------- #
+# Recursión (modo dir)
+# --------------------------------------------------------------------------- #
+# Tope duro de escaneos para que la recursión no explote en un target grande.
+RECURSION_MAX_SCANS = 60
+
+
+def _looks_like_dir(f: Finding) -> bool:
+    """True si el hallazgo parece un directorio en el que vale la pena entrar.
+
+    Señal fuerte: gobuster redirige a una ruta que termina en '/'. Señal débil:
+    un 200 sin extensión en el último segmento. No recursamos en 401/403 (suelen
+    bloquear) para no gastar escaneos al pedo.
+    """
+    if f.redirect and f.redirect.rstrip().endswith("/"):
+        return True
+    if f.status == "200":
+        last = f.path.rstrip("/").rsplit("/", 1)[-1]
+        return last != "" and "." not in last
+    return False
+
+
+def _full_path(base_url: str, rel_path: str) -> str:
+    """Ruta absoluta desde el host: base_path + rel_path (para el output agregado)."""
+    base_path = urlsplit(base_url).path.rstrip("/")
+    rel = rel_path if rel_path.startswith("/") else "/" + rel_path
+    return base_path + rel
+
+
+def _child_base(base_url: str, full_path: str) -> str:
+    """URL base para escanear dentro de `full_path`."""
+    parts = urlsplit(base_url)
+    return urlunsplit((parts.scheme, parts.netloc, full_path.rstrip("/") + "/", "", ""))
+
+
+def _norm_base(url: str) -> str:
+    return url.rstrip("/")
+
+
+def _run_recursive(scanner: Scanner, cfg: EnumConfig, wordlist: str) -> list[Finding]:
+    """Escanea en anchura (BFS): cada directorio encontrado se vuelve a escanear.
+
+    Reescribe el path de cada hallazgo a su ruta absoluta desde el host, deduplica
+    por ruta, respeta `cfg.depth` y corta en RECURSION_MAX_SCANS.
+    """
+    root = cfg._resolved_target.url  # type: ignore[union-attr]
+    queue: list[tuple[str, int]] = [(root, 0)]
+    seen_bases = {_norm_base(root)}
+    seen_paths: set[str] = set()
+    findings: list[Finding] = []
+    scans = 0
+
+    while queue:
+        if scans >= RECURSION_MAX_SCANS:
+            err.print(
+                f"[yellow][~] tope de recursión ({RECURSION_MAX_SCANS} escaneos) "
+                f"alcanzado — corto acá.[/yellow]"
+            )
+            break
+        base, depth = queue.pop(0)
+        scans += 1
+        shown = urlsplit(base).path or "/"
+        err.print(f"[cyan]▸[/cyan] escaneando [bold]{shown}[/bold] [dim](depth {depth})[/dim]")
+
+        cmd = scanner.build_command(cfg, wordlist, base_url=base)
+        batch = _stream_scan(scanner, cmd, cfg.mode, verbose=cfg.verbose)
+
+        for f in batch:
+            f.path = _full_path(base, f.path)
+            if f.path in seen_paths:
+                continue
+            seen_paths.add(f.path)
+            findings.append(f)
+            if depth < cfg.depth and _looks_like_dir(f):
+                child = _child_base(base, f.path)
+                if _norm_base(child) not in seen_bases:
+                    seen_bases.add(_norm_base(child))
+                    queue.append((child, depth + 1))
+
+    err.print(f"[dim]Recursión: {scans} escaneos, {len(findings)} hallazgos únicos.[/dim]")
+    return findings
 
 
 # --------------------------------------------------------------------------- #

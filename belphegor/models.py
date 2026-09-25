@@ -21,6 +21,7 @@ class Finding:
     size: str = ""             # tamaño de la respuesta como string; '' si no aplica
     redirect: str = ""         # destino del redirect (--> …), si lo hay
     source: str = "gobuster"   # motor que lo produjo
+    interesting: bool = False  # marcado como "jugoso" (ver utils.mark_interesting)
 
     def to_dict(self) -> dict:
         """Dict serializable (para JSON/JSONL)."""

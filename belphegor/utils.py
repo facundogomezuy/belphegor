@@ -25,6 +25,34 @@ WILDCARD_THRESHOLD = 0.7
 # este piso no clasificamos.
 MIN_RESULTS_FOR_WILDCARD = 5
 
+# Rutas/segmentos que suelen valer oro en un pentest o bug bounty. Si el path de
+# un hallazgo matchea alguno (como substring, case-insensitive), lo marcamos como
+# "jugoso" para que salte a la vista en la tabla y quede etiquetado en el JSON.
+INTERESTING_PATTERNS = (
+    ".git", ".svn", ".env", ".htaccess", ".htpasswd", ".ssh", ".aws",
+    "admin", "dashboard", "login", "logout", "signin", "register",
+    "config", "settings", "setup", "install", "phpinfo",
+    "backup", "backups", ".bak", ".old", ".zip", ".tar", ".sql", ".db",
+    "api", "graphql", "swagger", "openapi", "actuator",
+    "wp-admin", "wp-login", "wp-config", "xmlrpc",
+    "secret", "secrets", "token", "credential", "password", "passwd",
+    "debug", "test", "dev", "staging", "internal", "private",
+    "upload", "uploads", "files", "console", "shell", "cmd",
+)
+
+
+def is_interesting(path: str) -> bool:
+    """True si la ruta matchea algún patrón jugoso conocido."""
+    low = path.lower()
+    return any(p in low for p in INTERESTING_PATTERNS)
+
+
+def mark_interesting(findings: list[Finding]) -> list[Finding]:
+    """Marca in-place los hallazgos jugosos y los devuelve."""
+    for f in findings:
+        f.interesting = is_interesting(f.path)
+    return findings
+
 
 # --------------------------------------------------------------------------- #
 # Presentación
@@ -41,17 +69,24 @@ def print_results_table(results: list[Finding], title: str = "Resultados") -> No
     table.add_column("Status", justify="center")
     table.add_column("Size", justify="right", style="dim")
 
+    any_interesting = False
     for i, f in enumerate(results, 1):
         status = str(f.status)
         status_style = _status_style(status)
+        path_cell = f.path or f.raw
+        if f.interesting:
+            any_interesting = True
+            path_cell = f"[bold]★[/bold] [bold cyan]{path_cell}[/bold cyan]"
         table.add_row(
             str(i),
-            f.path or f.raw,
+            path_cell,
             f"[{status_style}]{status}[/{status_style}]" if status else "",
             str(f.size),
         )
 
     out.print(table)
+    if any_interesting:
+        out.print("[dim]★ = posible hallazgo jugoso (ruta de interés conocida)[/dim]")
 
 
 def render_results(

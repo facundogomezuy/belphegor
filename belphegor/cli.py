@@ -95,6 +95,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Formato del archivo de salida (default txt).",
     )
     enum.add_argument(
+        "-r", "--recursive", action="store_true",
+        help="Recursar en los directorios encontrados (solo modo dir).",
+    )
+    enum.add_argument(
+        "--depth", type=int, default=2,
+        help="Profundidad máxima de recursión con -r (default 2).",
+    )
+    enum.add_argument(
         "--engine", choices=ENGINES, default="gobuster",
         help="Motor de escaneo (default gobuster).",
     )
@@ -139,6 +147,8 @@ def run_enum_from_args(args: argparse.Namespace) -> int:
         auto_filter=args.auto_filter,
         verbose=args.verbose,
         engine=args.engine,
+        recursive=args.recursive,
+        depth=args.depth,
         # JSONL por stdout si se pidió --json, o si stdout no es una terminal
         # (redirección / pipe): así la salida se integra a un pipeline sola.
         stdout_json=args.json or not sys.stdout.isatty(),
@@ -215,10 +225,20 @@ def _interactive_enum(verbose: bool = False) -> None:
     delay = Prompt.ask("Delay entre requests [dim](Enter = ninguno)[/dim]", default="").strip() or None
 
     extensions = None
+    recursive = False
+    depth = 2
     if mode == "dir":
         extensions = Prompt.ask(
             "Extensiones [dim](ej php,html,bak — Enter = ninguna)[/dim]", default=""
         ).strip() or None
+        depth_raw = Prompt.ask(
+            "Profundidad recursiva [dim](0 = sin recursión)[/dim]", default="0"
+        ).strip()
+        try:
+            depth = int(depth_raw)
+        except ValueError:
+            depth = 0
+        recursive = depth > 0
 
     protocol = None
     if mode != "dns":
@@ -237,6 +257,8 @@ def _interactive_enum(verbose: bool = False) -> None:
         extensions=extensions,
         force_scheme=protocol,
         verbose=verbose,
+        recursive=recursive,
+        depth=depth if depth > 0 else 2,
     )
 
     # Todas las pautas elegidas: limpio la consola y dejo solo el nombre
@@ -248,6 +270,7 @@ def _interactive_enum(verbose: bool = False) -> None:
             f" · ext {extensions}" if extensions else "",
             f" · proto {protocol}" if protocol else "",
             " · [green]verbose[/green]" if verbose else "",
+            f" · [magenta]recursivo (depth {depth})[/magenta]" if recursive else "",
         )
     )
     summary = (

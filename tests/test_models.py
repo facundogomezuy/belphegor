@@ -22,4 +22,5 @@ def test_finding_to_dict():
         "size": "10",
         "redirect": "",
         "source": "ffuf",
+        "interesting": False,
     }
