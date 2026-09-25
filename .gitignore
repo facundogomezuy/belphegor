@@ -28,3 +28,6 @@ output/
 .vscode/
 *.swp
 .DS_Store
+
+# Notas de desarrollo (no van al repo)
+NOTAS.md

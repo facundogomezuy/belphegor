@@ -196,7 +196,24 @@ def _interactive_enum() -> None:
         extensions=extensions,
         force_scheme=protocol,
     )
-    console.print()
+
+    # Todas las pautas elegidas: limpio la consola y dejo solo el nombre
+    # grande + este resumen del escaneo antes de arrancar gobuster.
+    wl_desc = f"wordlist propia ({wordlist})" if wordlist else f"nivel [bold]{level}[/bold]"
+    extras = "".join(
+        part for part in (
+            f" · delay {delay}" if delay else "",
+            f" · ext {extensions}" if extensions else "",
+            f" · proto {protocol}" if protocol else "",
+        )
+    )
+    summary = (
+        f"[bold cyan]Escaneo[/bold cyan] · gobuster [green]{mode}[/green] → "
+        f"[bold]{target.strip()}[/bold]\n"
+        f"[dim]{wl_desc} · {threads} hilos{extras}[/dim]"
+    )
+    banner.render_scan_header(summary)
+
     try:
         enum_gobuster.run(cfg, interactive=True)
     except (ToolMissingError, TargetError) as exc:

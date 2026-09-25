@@ -275,7 +275,7 @@ def run(cfg: EnumConfig, interactive: bool = False) -> list[dict]:
     results = _stream_gobuster(cmd, cfg.mode)
 
     console.print()
-    _, _, wildcard = render_results(results, title=f"gobuster {cfg.mode} — {cfg.target}")
+    _, _, wildcard = render_results(results, title="Hallazgos")
 
     # 5. Si hay comodín, sugerir/ofrecer re-correr con el filtro nativo de
     #    gobuster (--exclude-length). No se toca si no hay comodín.
@@ -310,7 +310,7 @@ def _handle_wildcard_filter(
         console.print(f"[dim]$ {suggestion}[/dim]\n")
         new_results = _stream_gobuster(refiltered_cmd, cfg.mode)
         console.print()
-        render_results(new_results, title=f"gobuster {cfg.mode} — {cfg.target} (filtrado)")
+        render_results(new_results, title="Hallazgos (filtrado)")
         return new_results
 
     if interactive:
@@ -374,7 +374,7 @@ def _stream_gobuster(cmd: list[str], mode: str) -> list[dict]:
         with Progress(
             SpinnerColumn(),
             TextColumn("[cyan]Escaneando…[/cyan]"),
-            TextColumn("[green]{task.fields[hits]}[/green] hallazgos"),
+            TextColumn("[green]{task.fields[hits]}[/green] posibles hallazgos"),
             TimeElapsedColumn(),
             console=console,
             transient=True,
@@ -420,7 +420,7 @@ def _stream_gobuster(cmd: list[str], mode: str) -> list[dict]:
         )
 
     elapsed = time.monotonic() - start
-    console.print(f"[dim]Listo en {elapsed:.1f}s — {len(results)} hallazgos parseados.[/dim]")
+    console.print(f"[dim]Listo en {elapsed:.1f}s — {len(results)} posibles hallazgos.[/dim]")
 
     returncode = proc.returncode if proc is not None else None
     if returncode not in (0, None) and not results:
