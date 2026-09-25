@@ -143,6 +143,10 @@ belphegor
 ╰─────────────────────────────────────────────────╯
 ```
 
+> 💡 `belphegor -v` entra al **mismo menú pero con verbose activado**: cada
+> escaneo que lances desde ahí va mostrando los hallazgos en vivo, sin tener que
+> elegir nada extra. En CLI el flag va igual: `belphegor enum pepito.com -m dir -v`.
+
 ### CLI directo (scripteable)
 
 ```bash

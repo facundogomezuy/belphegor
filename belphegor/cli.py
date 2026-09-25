@@ -37,6 +37,15 @@ def build_parser() -> argparse.ArgumentParser:
         "-V", "--version", action="version",
         version=f"belphegor {__version__}",
     )
+    # -v es global: sirve tanto para `belphegor -v` (menú interactivo con
+    # verbose) como para `belphegor enum ... -v` (CLI). El subparser lo repite
+    # con default=SUPPRESS para no pisar este valor cuando va antes del
+    # subcomando (ver build de `enum`).
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", default=False,
+        help="Mostrar cada hallazgo en vivo, apenas aparece (útil en CTF). "
+             "Sin subcomando, entra al menú interactivo con verbose activado.",
+    )
     sub = parser.add_subparsers(dest="command")
 
     # ---- enum (gobuster) -------------------------------------------------- #
@@ -88,8 +97,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-install", action="store_true",
         help="No ofrecer instalar herramientas faltantes (útil para scripts/CI).",
     )
+    # Mismo dest que el flag global. default=SUPPRESS: si acá no viene -v, no
+    # escribe nada en el namespace, así no pisa un -v que haya ido antes del
+    # subcomando (belphegor -v enum ...). Si viene, lo activa.
     enum.add_argument(
-        "-v", "--verbose", action="store_true",
+        "-v", "--verbose", action="store_true", default=argparse.SUPPRESS,
         help="Mostrar cada hallazgo en vivo, apenas aparece (útil en CTF, "
              "donde querés reaccionar rápido). Por defecto van todos juntos a "
              "la tabla final.",
@@ -135,9 +147,12 @@ MENU = """\
 """
 
 
-def interactive_menu() -> int:
+def interactive_menu(verbose: bool = False) -> int:
     while True:
         console.print(Panel(MENU, title="[bold]Menú principal[/bold]", border_style="cyan"))
+        if verbose:
+            console.print("[dim]— modo verbose activo (-v): los hallazgos se "
+                          "muestran en vivo durante el escaneo —[/dim]")
         choice = Prompt.ask("Elegí una opción", choices=["1", "2", "3", "4"], default="3")
 
         if choice == "1":
@@ -145,7 +160,7 @@ def interactive_menu() -> int:
         elif choice == "2":
             _coming_soon("Descubrimiento activo")
         elif choice == "3":
-            _interactive_enum()
+            _interactive_enum(verbose=verbose)
         elif choice == "4":
             console.print("[dim]Hasta la próxima.[/dim]")
             return 0
@@ -163,7 +178,7 @@ def _coming_soon(name: str) -> None:
     console.print()
 
 
-def _interactive_enum() -> None:
+def _interactive_enum(verbose: bool = False) -> None:
     console.print()
     target = Prompt.ask("[bold]Objetivo[/bold] (dominio o URL)")
     if not target.strip():
@@ -206,6 +221,7 @@ def _interactive_enum() -> None:
         delay=delay,
         extensions=extensions,
         force_scheme=protocol,
+        verbose=verbose,
     )
 
     # Todas las pautas elegidas: limpio la consola y dejo solo el nombre
@@ -216,6 +232,7 @@ def _interactive_enum() -> None:
             f" · delay {delay}" if delay else "",
             f" · ext {extensions}" if extensions else "",
             f" · proto {protocol}" if protocol else "",
+            " · [green]verbose[/green]" if verbose else "",
         )
     )
     summary = (
@@ -282,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
     check_tools()
     console.print()
     try:
-        return interactive_menu()
+        return interactive_menu(verbose=args.verbose)
     except KeyboardInterrupt:
         console.print("\n[dim]Interrumpido.[/dim]")
         return 130
