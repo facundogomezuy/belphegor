@@ -15,11 +15,13 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from ..preflight import Target, build_target, ensure_tool, TargetError
 from ..utils import (
@@ -163,6 +165,18 @@ def resolve_wordlist(cfg: EnumConfig) -> str:
     )
 
 
+def count_wordlist_lines(path: str) -> int:
+    """Cuenta las líneas no vacías de la wordlist (para dar contexto de tamaño).
+
+    Es solo informativo: gobuster no expone de forma fiable cuántas rutas ya
+    probó cuando corre con --no-color y stdout no es una TTY (ver
+    _stream_gobuster), así que no lo usamos para una barra de progreso "X/Y"
+    real, solo para mostrar el total antes de arrancar.
+    """
+    with open(path, encoding="utf-8", errors="ignore") as fh:
+        return sum(1 for line in fh if line.strip())
+
+
 def build_command(cfg: EnumConfig, wordlist: str) -> list[str]:
     """Arma la lista de argumentos para subprocess según el modo."""
     cmd: list[str] = ["gobuster", cfg.mode]
@@ -244,7 +258,8 @@ def run(cfg: EnumConfig, interactive: bool = False) -> list[dict]:
     # 3. Wordlist (por -w propia, o resuelta desde el nivel).
     wordlist = resolve_wordlist(cfg)
     origin = "propia" if cfg.wordlist else f"nivel {cfg.level}"
-    console.print(f"[dim]Wordlist ({origin}): {wordlist}[/dim]")
+    total_words = count_wordlist_lines(wordlist)
+    console.print(f"[dim]Wordlist ({origin}): {wordlist} — {total_words} rutas[/dim]")
 
     # 4. Aviso por hilos altos (no corta).
     if cfg.threads > THREADS_WARN_ABOVE:
@@ -328,14 +343,23 @@ def _handle_wildcard_filter(
 
 
 def _stream_gobuster(cmd: list[str], mode: str) -> list[dict]:
-    """Corre gobuster capturando stdout en tiempo real.
+    """Corre gobuster leyendo stdout y muestra un spinner en vez de scroll infinito.
 
-    Imprime cada línea a medida que llega y maneja Ctrl+C matando el subprocess
+    NOTA TÉCNICA: gobuster (v3.8.2, --no-color, stdout no-TTY como acá) no
+    emite líneas de "Progress: X/Y" de forma fiable — probado en vivo contra
+    un target real con ~3000 palabras y no imprimió ninguna. Por eso el
+    progreso NO muestra "rutas probadas/total" (sería un % inventado): solo
+    spinner + cantidad de hallazgos + tiempo transcurrido, que sí podemos
+    contar con certeza nosotros mismos a partir de lo que parseamos.
+
+    Los hallazgos no se imprimen uno por uno: se acumulan y van todos a la
+    tabla final (ver render_results). Maneja Ctrl+C matando el subprocess
     para no dejar procesos colgados.
     """
     results: list[dict] = []
     fatal_line: Optional[str] = None
     proc: Optional[subprocess.Popen] = None
+    start = time.monotonic()
     try:
         proc = subprocess.Popen(
             cmd,
@@ -347,24 +371,31 @@ def _stream_gobuster(cmd: list[str], mode: str) -> list[dict]:
             preexec_fn=os.setsid if hasattr(os, "setsid") else None,
         )
         assert proc.stdout is not None
-        for line in proc.stdout:
-            line = line.rstrip("\n")
-            if not line.strip():
-                continue
-            if is_wildcard_precheck_error(line):
-                # gobuster aborta: el target devuelve el mismo status/tamaño
-                # para una URL inexistente (catch-all 403, WAF, vhost
-                # comodín...). No es un hallazgo, es el motivo del fracaso.
-                fatal_line = line.strip()
-                console.print(f"  [bold red]![/bold red] {line}")
-                continue
-            parsed = parse_gobuster_line(line, mode)
-            if parsed is not None:
-                results.append(parsed)
-                console.print(f"  [green]›[/green] {line}")
-            else:
-                # Línea de infra/progreso: la mostramos tenue para dar señal de vida.
-                console.print(f"  [dim]{line}[/dim]")
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[cyan]Escaneando…[/cyan]"),
+            TextColumn("[green]{task.fields[hits]}[/green] hallazgos"),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task("scan", hits=0)
+            for line in proc.stdout:
+                line = line.rstrip("\n")
+                if not line.strip():
+                    continue
+                if is_wildcard_precheck_error(line):
+                    # gobuster aborta: el target devuelve el mismo
+                    # status/tamaño para una URL inexistente (catch-all 403,
+                    # WAF, vhost comodín...). No es un hallazgo, es el motivo
+                    # del fracaso — se muestra igual aunque haya progress bar.
+                    fatal_line = line.strip()
+                    progress.console.print(f"  [bold red]![/bold red] {line}")
+                    continue
+                parsed = parse_gobuster_line(line, mode)
+                if parsed is not None:
+                    results.append(parsed)
+                    progress.update(task, hits=len(results))
         proc.wait()
     except KeyboardInterrupt:
         console.print("\n[bold yellow][!] Ctrl+C — cortando gobuster…[/bold yellow]")
@@ -387,6 +418,9 @@ def _stream_gobuster(cmd: list[str], mode: str) -> list[dict]:
             "      - excluir ese status con -b/--status-exclude (ej: 403,404)\n"
             "      - confirmar a mano con curl si es un WAF o el 403 es real"
         )
+
+    elapsed = time.monotonic() - start
+    console.print(f"[dim]Listo en {elapsed:.1f}s — {len(results)} hallazgos parseados.[/dim]")
 
     returncode = proc.returncode if proc is not None else None
     if returncode not in (0, None) and not results:
