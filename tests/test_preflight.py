@@ -113,6 +113,36 @@ def test_build_target_dns_no_resuelve(monkeypatch):
         build_target("no-existe-jamas.invalid")
 
 
+class _FakeResp:
+    def __init__(self, status, body):
+        self.status_code = status
+        self.content = body
+
+
+def test_calibrate_detecta_catchall(monkeypatch):
+    monkeypatch.setattr(preflight.requests, "get",
+                        lambda url, **k: _FakeResp(200, b"same body"))
+    wc = preflight.calibrate_wildcard("http://host")
+    assert wc == {"status": "200", "size": str(len(b"same body"))}
+
+
+def test_calibrate_404_no_es_comodin(monkeypatch):
+    monkeypatch.setattr(preflight.requests, "get",
+                        lambda url, **k: _FakeResp(404, b"nope"))
+    assert preflight.calibrate_wildcard("http://host") is None
+
+
+def test_calibrate_respuestas_distintas(monkeypatch):
+    contador = {"n": 0}
+
+    def fake_get(url, **k):
+        contador["n"] += 1
+        return _FakeResp(200, b"x" * contador["n"])
+
+    monkeypatch.setattr(preflight.requests, "get", fake_get)
+    assert preflight.calibrate_wildcard("http://host") is None
+
+
 def test_resolve_prefiere_ipv4(monkeypatch):
     # getaddrinfo devuelve v6 primero y v4 después; debe elegir la v4.
     fake = [

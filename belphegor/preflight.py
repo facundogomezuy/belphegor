@@ -9,8 +9,10 @@ Este módulo agrupa dos responsabilidades del preflight:
 
 from __future__ import annotations
 
+import random
 import shutil
 import socket
+import string
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse, urlunparse
@@ -282,3 +284,44 @@ def build_target(target: str, force_scheme: Optional[str] = None) -> Target:
     # Preservamos el base path (si lo hubo) para no descartarlo en modo dir.
     url = urlunparse((scheme, _hostport_for_url(host), path, "", "", ""))
     return Target(raw=target, host=host, scheme=scheme, url=url, ip=ip)
+
+
+# --------------------------------------------------------------------------- #
+# Auto-calibración de comodín
+# --------------------------------------------------------------------------- #
+def _random_path(n: int = 16) -> str:
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
+
+
+def calibrate_wildcard(
+    base_url: str, samples: int = 3, timeout: float = 5.0
+) -> Optional[dict]:
+    """Detecta un catch-all pegándole a rutas random antes de escanear.
+
+    Pide `samples` rutas inexistentes al azar. Si el server responde a TODAS con
+    el mismo (status, tamaño) y ese status no es 404, es un comodín: devuelve
+    {"status", "size"} para excluir ese tamaño del escaneo. Devuelve None si no
+    hay patrón, si el status consistente es 404 (comportamiento normal), o si no
+    se puede probar.
+    """
+    if requests is None:
+        return None
+
+    statuses: list[int] = []
+    sizes: list[int] = []
+    base = base_url.rstrip("/")
+    for _ in range(samples):
+        url = f"{base}/{_random_path()}"
+        try:
+            resp = requests.get(url, timeout=timeout, verify=False, allow_redirects=False)
+        except requests.exceptions.RequestException:
+            return None
+        statuses.append(resp.status_code)
+        sizes.append(len(resp.content))
+
+    if len(set(statuses)) == 1 and len(set(sizes)) == 1:
+        status = statuses[0]
+        if status == 404:
+            return None  # 404 consistente = comportamiento normal, no comodín
+        return {"status": str(status), "size": str(sizes[0])}
+    return None

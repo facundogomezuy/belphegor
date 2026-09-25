@@ -48,3 +48,14 @@ def test_enum_json_flag():
 def test_enum_engine_invalido():
     with pytest.raises(SystemExit):
         build_parser().parse_args(["enum", "host", "-m", "dir", "--engine", "nope"])
+
+
+def test_enum_recursive_y_depth():
+    args = build_parser().parse_args(["enum", "host", "-m", "dir", "-r", "--depth", "3"])
+    assert args.recursive is True
+    assert args.depth == 3
+
+
+def test_enum_calibrate_flag():
+    args = build_parser().parse_args(["enum", "host", "-m", "dir", "--calibrate"])
+    assert args.calibrate is True

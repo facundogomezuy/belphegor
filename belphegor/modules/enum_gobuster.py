@@ -126,6 +126,7 @@ class EnumConfig:
     stdout_json: bool = False            # emitir JSONL por stdout (pipe / --json)
     recursive: bool = False               # -r: recursar en directorios (solo dir)
     depth: int = 2                        # --depth: profundidad máxima de recursión
+    calibrate: bool = False               # --calibrate: auto-detectar comodín antes
     _resolved_target: Optional[Target] = field(default=None, repr=False)
 
 
@@ -185,6 +186,24 @@ def _preflight(cfg: EnumConfig) -> None:
     err.print(Panel(detail, title="[green]Preflight OK[/green]", border_style="green"))
 
 
+def _calibrate(cfg: EnumConfig) -> None:
+    """Auto-calibra el comodín y, si lo detecta, setea exclude_length de entrada."""
+    from ..preflight import calibrate_wildcard
+
+    err.print("[dim]Calibrando comodín (rutas random)…[/dim]")
+    assert cfg._resolved_target is not None
+    baseline = calibrate_wildcard(cfg._resolved_target.url)
+    if baseline is not None:
+        cfg.exclude_length = baseline["size"]
+        err.print(
+            f"[yellow][~][/yellow] Calibración: el server responde igual a rutas "
+            f"inexistentes (status {baseline['status']} · size {baseline['size']}) — "
+            f"excluyo ese tamaño de entrada (--exclude-length {baseline['size']})."
+        )
+    else:
+        err.print("[dim]Calibración: sin comodín evidente.[/dim]")
+
+
 # --------------------------------------------------------------------------- #
 # Corrida principal
 # --------------------------------------------------------------------------- #
@@ -219,6 +238,11 @@ def run(cfg: EnumConfig, interactive: bool = False) -> list[Finding]:
             f"[yellow]— asegurate que el scope del programa lo permita antes de "
             f"martillar el target.[/yellow]"
         )
+
+    # 4.5. Auto-calibración de comodín (opcional, solo dir): si el server
+    #      responde igual a rutas random, excluimos ese tamaño de entrada.
+    if cfg.calibrate and cfg.mode == "dir" and not cfg.exclude_length:
+        _calibrate(cfg)
 
     # 5. Ejecución: recursiva (solo dir) o de una pasada.
     cmd: Optional[list[str]] = None
