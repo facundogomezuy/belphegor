@@ -65,9 +65,15 @@ la arquitectura ya está armada por módulos para sumar capacidades sin reescrib
 - 📥 **Auto-instalación consentida** — si falta gobuster, detecta tu gestor de
   paquetes y te ofrece instalarlo, mostrándote el comando exacto antes de correr
   nada. Nunca instala en silencio.
-- 🔌 **Motores intercambiables** — el fuzzing lo hace gobuster (ffuf en el
-  [roadmap](ROADMAP.md)) detrás de una interfaz común; Belphegor pone el flujo y
-  la inteligencia, no reinventa el motor.
+- 🔌 **Motores intercambiables** — el fuzzing lo hace **gobuster** o **ffuf**
+  (`--engine`) detrás de una interfaz común; Belphegor pone el flujo y la
+  inteligencia, no reinventa el motor.
+- 🔁 **Recursión automática** — `-r` entra solo en los directorios que encuentra,
+  con profundidad configurable, dedup y tope de seguridad.
+- 🎯 **Auto-calibración de comodín** — `--calibrate` le pega a rutas random antes
+  de escanear; si el server tiene catch-all, excluye ese tamaño de entrada.
+- ✨ **Hallazgos jugosos** — resalta rutas de interés conocidas (`/admin`,
+  `/.git`, `.env`, backups, `api`…) con ★ en la tabla y `interesting` en el JSON.
 - 🧵 **Salida pipeable** — `--json` (o automático al redirigir/pipear) emite
   **JSONL** por stdout para encadenar con `jq`, `httpx`, `nuclei`; todo el
   diagnóstico va a stderr, así el pipe queda limpio.
@@ -173,6 +179,12 @@ belphegor enum pepito.com -m dir -w /ruta/wordlist.txt
 
 # salida JSONL para encadenar con otras tools (el diagnóstico va a stderr)
 belphegor enum pepito.com -m dir --json | jq -r '.path'
+
+# recursión: entrar en cada directorio encontrado, hasta 3 niveles
+belphegor enum pepito.com -m dir -r --depth 3
+
+# usar ffuf como motor, con auto-calibración de comodín
+belphegor enum pepito.com -m dir --engine ffuf --calibrate
 ```
 
 > 💡 Sin instalar, desde el repo: `python -m belphegor` equivale al comando
@@ -232,7 +244,10 @@ evita los errores típicos antes de disparar el escaneo:
 | `--auto-filter` | Si detecta comodín, re-corre solo excluyendo su tamaño (sin preguntar) |
 | `--protocol` | Forzar `http` / `https` |
 | `-v, --verbose` | Imprimir cada hallazgo en vivo (útil en CTF) |
-| `--engine` | Motor de escaneo: `gobuster` (ffuf en el roadmap) |
+| `-r, --recursive` | Recursar en los directorios encontrados (solo modo `dir`) |
+| `--depth` | Profundidad máxima de recursión con `-r` (default 2) |
+| `--calibrate` | Detectar catch-all/comodín antes de escanear y excluir su tamaño |
+| `--engine` | Motor de escaneo: `gobuster` o `ffuf` |
 | `--json` | Emitir JSONL por stdout, para pipear (auto si no hay terminal) |
 | `-o, --output` | Archivo de salida |
 | `--format` | `txt`, `json` o `jsonl` |

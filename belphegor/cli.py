@@ -353,6 +353,10 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         console.print("\n[dim]Interrumpido.[/dim]")
         return 130
+    except EOFError:
+        # Sin más input (Ctrl+D o stdin agotado): salida limpia, no traceback.
+        console.print("\n[dim]Entrada terminada, salgo.[/dim]")
+        return 0
 
 
 if __name__ == "__main__":

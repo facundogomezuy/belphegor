@@ -32,19 +32,17 @@ Andamiaje que abarata todo lo demás.
 
 ---
 
-## ⏳ Fase 2 — Backend ffuf intercambiable
+## ✅ Fase 2 — Backend ffuf intercambiable *(hecho)*
 
-- [ ] `FfufScanner` detrás de la misma interfaz `Scanner` (`--engine ffuf`, con
-  autodetección del que esté instalado).
-- [ ] Traducir la config a `ffuf -of json` (más fácil de parsear que gobuster) y
-  aprovechar sus matchers/filtros más potentes.
+- [x] `FfufScanner` detrás de la misma interfaz `Scanner` (`--engine ffuf`) para
+  modos dir y vhost (dns queda en gobuster).
+- [x] Parser propio de la salida de ffuf, traducción de flags y manejo de su
+  stderr (progreso ruidoso) por separado.
 
-*Deja de depender de un solo motor y usa el mejor para cada caso.*
+## ✅ Fase 3 — Recursión automática *(hecho)*
 
-## ⏳ Fase 3 — Recursión automática
-
-- [ ] Al encontrar un directorio, re-lanzar el escaneo dentro, con `--depth`,
-  dedup y un tope para no explotar. Es lo que más ahorra tiempo manual.
+- [x] `-r/--recursive` + `--depth N`: al encontrar un directorio se re-escanea
+  dentro. BFS por niveles, paths absolutos, dedup y tope de seguridad.
 
 ## ⏳ Fase 4 — Encadenamiento
 
@@ -52,13 +50,16 @@ Andamiaje que abarata todo lo demás.
   que filtre vivos antes de fuzzear.
 - [ ] Control de scope: límites y confirmación en targets grandes.
 
-## ⏳ Fase 5 — Inteligencia sobre resultados
+> Nota: es la fase que conviene validar contra un target real con subdominios
+> (no se puede testear a fondo en localhost), así que va después de las demás.
 
-- [ ] **Auto-calibración** de comodín: pegar a N URLs random al inicio para el
-  baseline (más robusto que la detección post-hoc actual).
-- [ ] **Resaltar lo jugoso** (`/admin`, `/.git`, `.env`, backups…) y dedup por
-  content-hash.
-- [ ] Fingerprint básico desde headers.
+## ✅ Fase 5 — Inteligencia sobre resultados *(hecho)*
+
+- [x] **Auto-calibración** de comodín (`--calibrate`): pega a N URLs random al
+  inicio y excluye el tamaño del catch-all de entrada.
+- [x] **Resaltar lo jugoso** (`/admin`, `/.git`, `.env`, backups, api…) — marcado
+  con ★ en la tabla y campo `interesting` en el JSON.
+- [ ] Dedup por content-hash y fingerprint básico desde headers *(pendiente)*.
 
 ---
 
