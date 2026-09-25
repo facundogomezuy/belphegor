@@ -114,10 +114,12 @@ class EnumConfig:
     extensions: Optional[str] = None     # solo modo dir, ej "php,html,bak"
     status_include: Optional[str] = None  # gobuster -s
     status_exclude: Optional[str] = None  # gobuster -b
+    exclude_length: Optional[str] = None  # gobuster --exclude-length
     force_scheme: Optional[str] = None    # --protocol http|https
     output: Optional[str] = None
     out_format: str = "txt"
     no_install: bool = False              # --no-install: no ofrecer auto-instalar
+    auto_filter: bool = False             # --auto-filter: re-correr solo si se detecta comodín
     _resolved_target: Optional[Target] = field(default=None, repr=False)
 
 
@@ -186,6 +188,8 @@ def build_command(cfg: EnumConfig, wordlist: str) -> list[str]:
         cmd += ["-s", cfg.status_include]
     if cfg.status_exclude:
         cmd += ["-b", cfg.status_exclude]
+    if cfg.exclude_length:
+        cmd += ["--exclude-length", cfg.exclude_length]
 
     # Salida sin colores ANSI de gobuster para que nuestro parseo sea limpio.
     cmd += ["--no-color"]
@@ -256,11 +260,70 @@ def run(cfg: EnumConfig, interactive: bool = False) -> list[dict]:
     results = _stream_gobuster(cmd, cfg.mode)
 
     console.print()
-    render_results(results, title=f"gobuster {cfg.mode} — {cfg.target}")
+    _, _, wildcard = render_results(results, title=f"gobuster {cfg.mode} — {cfg.target}")
 
-    # 5. Guardado.
+    # 5. Si hay comodín, sugerir/ofrecer re-correr con el filtro nativo de
+    #    gobuster (--exclude-length). No se toca si no hay comodín.
+    if wildcard is not None:
+        results = _handle_wildcard_filter(cfg, cmd, results, wildcard, interactive)
+
+    # 6. Guardado.
     _handle_output(cfg, results, interactive, wordlist)
 
+    return results
+
+
+def _handle_wildcard_filter(
+    cfg: EnumConfig,
+    cmd: list[str],
+    results: list[dict],
+    wildcard: dict,
+    interactive: bool,
+) -> list[dict]:
+    """Sugiere u ofrece re-correr gobuster excluyendo el size del comodín.
+
+    En modo interactivo pregunta antes de re-correr. En modo CLI, re-corre
+    directo si vino --auto-filter; si no, solo imprime el comando exacto para
+    que el usuario lo corra a mano. Devuelve los resultados originales si no
+    se re-corrió, o los del re-run si sí.
+    """
+    pct = round(wildcard["fraction"] * 100)
+    refiltered_cmd = cmd + ["--exclude-length", str(wildcard["size"])]
+    suggestion = " ".join(refiltered_cmd)
+
+    def _rerun() -> list[dict]:
+        console.print(f"[dim]$ {suggestion}[/dim]\n")
+        new_results = _stream_gobuster(refiltered_cmd, cfg.mode)
+        console.print()
+        render_results(new_results, title=f"gobuster {cfg.mode} — {cfg.target} (filtrado)")
+        return new_results
+
+    if interactive:
+        from rich.prompt import Confirm
+
+        ask = (
+            f"\n¿Volver a correr excluyendo status {wildcard['status']} · size "
+            f"{wildcard['size']} ({wildcard['count']} resultados, {pct}%) con "
+            f"--exclude-length {wildcard['size']}?"
+        )
+        if Confirm.ask(ask, default=False):
+            return _rerun()
+        return results
+
+    if cfg.auto_filter:
+        console.print(
+            f"[yellow][~][/yellow] comodín detectado (status {wildcard['status']} · "
+            f"size {wildcard['size']}, {pct}%) — re-corriendo con --auto-filter."
+        )
+        return _rerun()
+
+    console.print(
+        f"[yellow][~][/yellow] Probable comodín: {wildcard['count']} resultados con "
+        f"status {wildcard['status']} · size {wildcard['size']} ({pct}%). "
+        f"Para filtrarlos, volvé a correr con:\n"
+        f"    [bold]{suggestion}[/bold]\n"
+        f"    [dim](o pasá --auto-filter para que belphegor lo haga solo)[/dim]"
+    )
     return results
 
 

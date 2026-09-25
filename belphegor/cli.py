@@ -63,6 +63,15 @@ def build_parser() -> argparse.ArgumentParser:
     enum.add_argument("-s", "--status-include", help="Status codes a incluir (gobuster -s).")
     enum.add_argument("-b", "--status-exclude", help="Status codes a excluir (gobuster -b).")
     enum.add_argument(
+        "--exclude-length",
+        help="Tamaño(s) de respuesta a excluir (gobuster --exclude-length).",
+    )
+    enum.add_argument(
+        "--auto-filter", action="store_true",
+        help="Si se detecta una respuesta comodín, re-correr solo excluyendo "
+             "su tamaño (sin preguntar).",
+    )
+    enum.add_argument(
         "--protocol", choices=["http", "https"],
         help="Forzar esquema y saltear la autodetección.",
     )
@@ -89,10 +98,12 @@ def run_enum_from_args(args: argparse.Namespace) -> int:
         extensions=args.extensions,
         status_include=args.status_include,
         status_exclude=args.status_exclude,
+        exclude_length=args.exclude_length,
         force_scheme=args.protocol,
         output=args.output,
         out_format=args.format,
         no_install=args.no_install,
+        auto_filter=args.auto_filter,
     )
     try:
         enum_gobuster.run(cfg, interactive=False)
