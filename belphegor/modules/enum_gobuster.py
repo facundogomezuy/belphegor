@@ -1,13 +1,17 @@
-"""Módulo de enumeración de contenido: wrapper de gobuster (dir/vhost/dns).
+"""Módulo de enumeración de contenido (dir/vhost/dns).
+
+Orquesta un motor de escaneo (backend) intercambiable — hoy gobuster, mañana
+ffuf — a través de la interfaz `Scanner` (ver engines.py). Este módulo es
+agnóstico del motor: resuelve el target y la wordlist, le pide al Scanner el
+comando y el parseo, y trabaja siempre con `Finding`.
 
 Flujo:
-  1. Preflight del target (resolución DNS + autodetección de protocolo) — salvo
-     en modo dns, donde gobuster trabaja sobre el dominio pelado y no necesita
-     esquema http/https.
-  2. Resolución de la wordlist (default según modo, o la que pase el usuario).
-  3. Armado del comando gobuster.
-  4. Ejecución con streaming de stdout en tiempo real y manejo limpio de Ctrl+C.
-  5. Parseo de resultados + tabla rich + guardado opcional.
+  1. Elegir motor + verificar su herramienta externa.
+  2. Preflight del target (DNS + autodetección de esquema; dns no necesita esquema).
+  3. Resolver la wordlist (default por nivel, o la propia del usuario).
+  4. Ejecutar con streaming (spinner) y manejo limpio de Ctrl+C.
+  5. Detección de comodín + presentación: tabla (stdout) o JSONL (stdout,
+     modo --json), con todo el diagnóstico por stderr.
 """
 
 from __future__ import annotations
@@ -15,39 +19,27 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
+from .._console import err
+from ..engines import Scanner, get_scanner
+from ..models import Finding
 from ..preflight import Target, build_target, ensure_tool, TargetError
-from ..utils import (
-    _status_style,
-    is_wildcard_precheck_error,
-    parse_gobuster_line,
-    render_results,
-    save_results,
-)
-
-console = Console()
+from ..utils import iter_jsonl, render_results, save_results, split_wildcard_noise
 
 MODES = ("dir", "vhost", "dns")
 
 LEVELS = ("basic", "full", "deep")
 DEFAULT_LEVEL = "basic"
 
-# Wordlists por (modo, nivel). Cada entrada es una LISTA de rutas candidatas:
-# los nombres/ubicaciones de SecLists varían entre Kali y BlackArch, así que
-# probamos en orden y usamos la primera que exista. Si ninguna está, se avisa
-# y se sugiere pasar -w con una wordlist propia.
-#
-# Niveles:
-#   basic → barrido rápido, primer vistazo (listas chicas)
-#   full  → cobertura media, lo más usado en bug bounty
-#   deep  → exhaustivo/agresivo (listas grandes, tarda y hace ruido)
+# Wordlists por (modo, nivel): lista de rutas candidatas, se usa la primera que
+# exista (SecLists varía entre Kali y BlackArch).
 WORDLISTS: dict[str, dict[str, list[str]]] = {
     "dir": {
         "basic": [
@@ -93,7 +85,6 @@ WORDLISTS: dict[str, dict[str, list[str]]] = {
     },
 }
 
-# Descripciones legibles de cada nivel, para el menú interactivo.
 LEVEL_DESC = {
     "basic": "rápido, primer vistazo (lista chica)",
     "full": "cobertura media, lo más usado en bug bounty",
@@ -122,11 +113,16 @@ class EnumConfig:
     output: Optional[str] = None
     out_format: str = "txt"
     no_install: bool = False              # --no-install: no ofrecer auto-instalar
-    auto_filter: bool = False             # --auto-filter: re-correr solo si se detecta comodín
+    auto_filter: bool = False             # --auto-filter: re-correr si hay comodín
     verbose: bool = False                 # -v: imprimir cada hallazgo en vivo (CTF)
+    engine: str = "gobuster"             # --engine: motor de escaneo
+    stdout_json: bool = False            # emitir JSONL por stdout (pipe / --json)
     _resolved_target: Optional[Target] = field(default=None, repr=False)
 
 
+# --------------------------------------------------------------------------- #
+# Wordlists
+# --------------------------------------------------------------------------- #
 def find_existing_wordlist(candidates: list[str]) -> Optional[str]:
     """Devuelve la primera ruta candidata que exista como archivo, o None."""
     for path in candidates:
@@ -138,21 +134,14 @@ def find_existing_wordlist(candidates: list[str]) -> Optional[str]:
 def resolve_wordlist(cfg: EnumConfig) -> str:
     """Devuelve la wordlist a usar, validando que exista.
 
-    Precedencia:
-      1. -w del usuario (si la pasó) → gana siempre, se ignora el nivel.
-      2. Nivel (basic/full/deep) → busca entre las rutas candidatas del modo
-         la primera que exista.
-
-    Raises:
-        TargetError: si no hay wordlist utilizable.
+    Precedencia: -w del usuario > preset por nivel. Raises TargetError si no hay
+    ninguna utilizable.
     """
-    # 1. Wordlist propia: prioridad absoluta.
     if cfg.wordlist:
         if not os.path.isfile(cfg.wordlist):
             raise TargetError(f"la wordlist «{cfg.wordlist}» no existe.")
         return cfg.wordlist
 
-    # 2. Preset por nivel: probar rutas candidatas.
     candidates = WORDLISTS[cfg.mode][cfg.level]
     found = find_existing_wordlist(candidates)
     if found is not None:
@@ -168,150 +157,136 @@ def resolve_wordlist(cfg: EnumConfig) -> str:
 
 
 def count_wordlist_lines(path: str) -> int:
-    """Cuenta las líneas no vacías de la wordlist (para dar contexto de tamaño).
-
-    Es solo informativo: gobuster no expone de forma fiable cuántas rutas ya
-    probó cuando corre con --no-color y stdout no es una TTY (ver
-    _stream_gobuster), así que no lo usamos para una barra de progreso "X/Y"
-    real, solo para mostrar el total antes de arrancar.
-    """
+    """Cuenta las líneas no vacías de la wordlist (solo informativo)."""
     with open(path, encoding="utf-8", errors="ignore") as fh:
         return sum(1 for line in fh if line.strip())
 
 
-def build_command(cfg: EnumConfig, wordlist: str) -> list[str]:
-    """Arma la lista de argumentos para subprocess según el modo."""
-    cmd: list[str] = ["gobuster", cfg.mode]
-
-    if cfg.mode == "dir":
-        tgt = cfg._resolved_target
-        assert tgt is not None
-        cmd += ["-u", tgt.url]
-    elif cfg.mode == "vhost":
-        tgt = cfg._resolved_target
-        assert tgt is not None
-        cmd += ["-u", tgt.url, "--append-domain"]
-    else:  # dns
-        cmd += ["-d", _dns_domain(cfg)]
-
-    cmd += ["-w", wordlist, "-t", str(cfg.threads)]
-
-    if cfg.delay:
-        cmd += ["--delay", cfg.delay]
-    if cfg.mode == "dir" and cfg.extensions:
-        cmd += ["-x", cfg.extensions]
-    if cfg.status_include:
-        cmd += ["-s", cfg.status_include]
-    if cfg.status_exclude:
-        cmd += ["-b", cfg.status_exclude]
-    if cfg.exclude_length:
-        cmd += ["--exclude-length", cfg.exclude_length]
-
-    # Salida sin colores ANSI de gobuster para que nuestro parseo sea limpio.
-    cmd += ["--no-color"]
-    return cmd
-
-
-def _dns_domain(cfg: EnumConfig) -> str:
-    """En modo dns usamos el host pelado (sin esquema)."""
-    if cfg._resolved_target is not None:
-        return cfg._resolved_target.host
-    # Fallback defensivo: limpiar esquema si vino.
-    return cfg.target.replace("https://", "").replace("http://", "").strip("/")
-
-
+# --------------------------------------------------------------------------- #
+# Preflight
+# --------------------------------------------------------------------------- #
 def _preflight(cfg: EnumConfig) -> None:
-    """Corre el preflight del target y lo cachea en la config.
-
-    En modo dns no necesitamos esquema http/https, pero igual resolvemos el
-    host para dar feedback temprano si el dominio no existe.
-    """
+    """Resuelve el target y lo cachea en la config (diagnóstico → stderr)."""
     tgt = build_target(cfg.target, force_scheme=cfg.force_scheme)
     cfg._resolved_target = tgt
 
     detail = f"[bold]{tgt.host}[/bold] → {tgt.ip}"
     if cfg.mode != "dns":
         detail += f"  ·  esquema: [cyan]{tgt.scheme}[/cyan]"
-    console.print(
-        Panel(detail, title="[green]Preflight OK[/green]", border_style="green")
-    )
+    err.print(Panel(detail, title="[green]Preflight OK[/green]", border_style="green"))
 
 
-def run(cfg: EnumConfig, interactive: bool = False) -> list[dict]:
-    """Ejecuta el módulo completo. Devuelve la lista de hallazgos parseados.
-
-    Args:
-        cfg:         configuración de la corrida.
-        interactive: si True y no se especificó output, pregunta al final si
-                     quiere guardar y a dónde.
-    """
+# --------------------------------------------------------------------------- #
+# Corrida principal
+# --------------------------------------------------------------------------- #
+def run(cfg: EnumConfig, interactive: bool = False) -> list[Finding]:
+    """Ejecuta el módulo completo. Devuelve la lista de hallazgos."""
     if cfg.mode not in MODES:
         raise TargetError(f"modo inválido: «{cfg.mode}» (usá dir / vhost / dns).")
     if cfg.level not in LEVELS:
         raise TargetError(f"nivel inválido: «{cfg.level}» (usá basic / full / deep).")
+    try:
+        scanner = get_scanner(cfg.engine)
+    except ValueError as exc:
+        raise TargetError(str(exc))
 
-    # 1. La herramienta tiene que estar sí o sí antes de seguir. Si falta,
-    #    ensure_tool ofrece instalarla (salvo --no-install) antes de cortar.
-    ensure_tool("gobuster", no_install=cfg.no_install)
+    # 1. La herramienta del motor tiene que estar. Si falta, ensure_tool ofrece
+    #    instalarla (salvo --no-install) antes de cortar.
+    ensure_tool(scanner.tool, no_install=cfg.no_install)
 
     # 2. Preflight del target.
     _preflight(cfg)
 
-    # 3. Wordlist (por -w propia, o resuelta desde el nivel).
+    # 3. Wordlist.
     wordlist = resolve_wordlist(cfg)
     origin = "propia" if cfg.wordlist else f"nivel {cfg.level}"
     total_words = count_wordlist_lines(wordlist)
-    console.print(f"[dim]Wordlist ({origin}): {wordlist} — {total_words} rutas[/dim]")
+    err.print(f"[dim]Wordlist ({origin}): {wordlist} — {total_words} rutas[/dim]")
 
     # 4. Aviso por hilos altos (no corta).
     if cfg.threads > THREADS_WARN_ABOVE:
-        console.print(
+        err.print(
             f"[bold yellow]⚠️  {cfg.threads} hilos es agresivo[/bold yellow] "
-            f"[yellow]— asegurate que el scope del programa de bug bounty lo "
-            f"permita antes de martillar el target.[/yellow]"
+            f"[yellow]— asegurate que el scope del programa lo permita antes de "
+            f"martillar el target.[/yellow]"
         )
 
-    cmd = build_command(cfg, wordlist)
-    console.print(f"[dim]$ {' '.join(cmd)}[/dim]\n")
+    cmd = scanner.build_command(cfg, wordlist)
+    err.print(f"[dim]$ {' '.join(cmd)}[/dim]\n")
 
-    results = _stream_gobuster(cmd, cfg.mode, verbose=cfg.verbose)
+    results = _stream_scan(scanner, cmd, cfg.mode, verbose=cfg.verbose)
 
-    console.print()
-    _, _, wildcard = render_results(results, title="Hallazgos")
+    # 5. Presentación + manejo de comodín.
+    if cfg.stdout_json:
+        _, _, wildcard = split_wildcard_noise(results)
+        if wildcard is not None and cfg.auto_filter:
+            results = _rerun_filtered(scanner, cfg, cmd, wildcard)
+            _, _, wildcard = split_wildcard_noise(results)
+        _emit_jsonl(results)
+        if wildcard is not None:
+            _warn_wildcard(cfg, cmd, wildcard)
+    else:
+        err.print()
+        _, _, wildcard = render_results(results, title="Hallazgos")
+        if wildcard is not None:
+            results = _handle_wildcard_filter(scanner, cfg, cmd, results, wildcard, interactive)
 
-    # 5. Si hay comodín, sugerir/ofrecer re-correr con el filtro nativo de
-    #    gobuster (--exclude-length). No se toca si no hay comodín.
-    if wildcard is not None:
-        results = _handle_wildcard_filter(cfg, cmd, results, wildcard, interactive)
-
-    # 6. Guardado.
+    # 6. Guardado a archivo (si corresponde).
     _handle_output(cfg, results, interactive, wordlist)
 
     return results
 
 
+def _emit_jsonl(results: list[Finding]) -> None:
+    """Escribe los hallazgos como JSONL en stdout (para pipear)."""
+    for linea in iter_jsonl(results):
+        sys.stdout.write(linea + "\n")
+    sys.stdout.flush()
+
+
+def _warn_wildcard(cfg: EnumConfig, cmd: list[str], wildcard: dict) -> None:
+    """Aviso de comodín por stderr (no ensucia el JSONL de stdout)."""
+    pct = round(wildcard["fraction"] * 100)
+    sugerencia = " ".join(cmd + ["--exclude-length", str(wildcard["size"])])
+    err.print(
+        f"[yellow][~][/yellow] Probable comodín: {wildcard['count']} resultados con "
+        f"status {wildcard['status']} · size {wildcard['size']} ({pct}%). "
+        f"Filtralos con: [bold]{sugerencia}[/bold] "
+        f"[dim](o --auto-filter)[/dim]"
+    )
+
+
+def _rerun_filtered(
+    scanner: Scanner, cfg: EnumConfig, cmd: list[str], wildcard: dict
+) -> list[Finding]:
+    """Re-corre excluyendo el size del comodín (diagnóstico → stderr)."""
+    pct = round(wildcard["fraction"] * 100)
+    refiltered = cmd + ["--exclude-length", str(wildcard["size"])]
+    err.print(
+        f"[yellow][~][/yellow] comodín detectado (status {wildcard['status']} · "
+        f"size {wildcard['size']}, {pct}%) — re-corriendo con --auto-filter."
+    )
+    err.print(f"[dim]$ {' '.join(refiltered)}[/dim]\n")
+    return _stream_scan(scanner, refiltered, cfg.mode, verbose=cfg.verbose)
+
+
 def _handle_wildcard_filter(
+    scanner: Scanner,
     cfg: EnumConfig,
     cmd: list[str],
-    results: list[dict],
+    results: list[Finding],
     wildcard: dict,
     interactive: bool,
-) -> list[dict]:
-    """Sugiere u ofrece re-correr gobuster excluyendo el size del comodín.
-
-    En modo interactivo pregunta antes de re-correr. En modo CLI, re-corre
-    directo si vino --auto-filter; si no, solo imprime el comando exacto para
-    que el usuario lo corra a mano. Devuelve los resultados originales si no
-    se re-corrió, o los del re-run si sí.
-    """
+) -> list[Finding]:
+    """Sugiere u ofrece re-correr excluyendo el size del comodín (modo humano)."""
     pct = round(wildcard["fraction"] * 100)
-    refiltered_cmd = cmd + ["--exclude-length", str(wildcard["size"])]
-    suggestion = " ".join(refiltered_cmd)
+    refiltered = cmd + ["--exclude-length", str(wildcard["size"])]
+    suggestion = " ".join(refiltered)
 
-    def _rerun() -> list[dict]:
-        console.print(f"[dim]$ {suggestion}[/dim]\n")
-        new_results = _stream_gobuster(refiltered_cmd, cfg.mode, verbose=cfg.verbose)
-        console.print()
+    def _rerun() -> list[Finding]:
+        err.print(f"[dim]$ {suggestion}[/dim]\n")
+        new_results = _stream_scan(scanner, refiltered, cfg.mode, verbose=cfg.verbose)
+        err.print()
         render_results(new_results, title="Hallazgos (filtrado)")
         return new_results
 
@@ -328,13 +303,13 @@ def _handle_wildcard_filter(
         return results
 
     if cfg.auto_filter:
-        console.print(
+        err.print(
             f"[yellow][~][/yellow] comodín detectado (status {wildcard['status']} · "
             f"size {wildcard['size']}, {pct}%) — re-corriendo con --auto-filter."
         )
         return _rerun()
 
-    console.print(
+    err.print(
         f"[yellow][~][/yellow] Probable comodín: {wildcard['count']} resultados con "
         f"status {wildcard['status']} · size {wildcard['size']} ({pct}%). "
         f"Para filtrarlos, volvé a correr con:\n"
@@ -344,37 +319,34 @@ def _handle_wildcard_filter(
     return results
 
 
-def _format_hit(item: dict) -> str:
+# --------------------------------------------------------------------------- #
+# Streaming del subprocess
+# --------------------------------------------------------------------------- #
+def _format_hit(f: Finding) -> str:
     """Formatea un hallazgo para imprimirlo en vivo (modo verbose)."""
-    path = item.get("path", item.get("raw", ""))
-    status = str(item.get("status", ""))
-    size = str(item.get("size", ""))
-    parts = [f"  [green]›[/green] [cyan]{path}[/cyan]"]
-    if status:
-        st = _status_style(status)
-        parts.append(f"[{st}]{status}[/{st}]")
-    if size:
-        parts.append(f"[dim]{size}b[/dim]")
+    parts = [f"  [green]›[/green] [cyan]{f.path or f.raw}[/cyan]"]
+    if f.status:
+        parts.append(f"[{_status_color(f.status)}]{f.status}[/{_status_color(f.status)}]")
+    if f.size:
+        parts.append(f"[dim]{f.size}b[/dim]")
     return "  ".join(parts)
 
 
-def _stream_gobuster(cmd: list[str], mode: str, verbose: bool = False) -> list[dict]:
-    """Corre gobuster leyendo stdout y muestra un spinner en vez de scroll infinito.
+def _status_color(status: str) -> str:
+    from ..utils import _status_style
+    return _status_style(status)
 
-    NOTA TÉCNICA: gobuster (v3.8.2, --no-color, stdout no-TTY como acá) no
-    emite líneas de "Progress: X/Y" de forma fiable — probado en vivo contra
-    un target real con ~3000 palabras y no imprimió ninguna. Por eso el
-    progreso NO muestra "rutas probadas/total" (sería un % inventado): solo
-    spinner + cantidad de hallazgos + tiempo transcurrido, que sí podemos
-    contar con certeza nosotros mismos a partir de lo que parseamos.
 
-    Por defecto los hallazgos no se imprimen uno por uno: se acumulan y van
-    todos a la tabla final (ver render_results). Con `verbose=True` (flag -v)
-    además se imprime cada hallazgo apenas aparece, por encima del spinner —
-    útil en CTF cuando querés reaccionar al toque sin esperar la tabla.
-    Maneja Ctrl+C matando el subprocess para no dejar procesos colgados.
+def _stream_scan(
+    scanner: Scanner, cmd: list[str], mode: str, verbose: bool = False
+) -> list[Finding]:
+    """Corre el motor leyendo stdout, con spinner (todo el ruido va a stderr).
+
+    Los hallazgos se acumulan y van a la tabla/JSONL final. Con verbose además
+    se imprimen en vivo (por stderr, para no ensuciar un JSONL en stdout). Ctrl+C
+    mata el subprocess para no dejar procesos colgados.
     """
-    results: list[dict] = []
+    results: list[Finding] = []
     fatal_line: Optional[str] = None
     proc: Optional[subprocess.Popen] = None
     start = time.monotonic()
@@ -385,7 +357,6 @@ def _stream_gobuster(cmd: list[str], mode: str, verbose: bool = False) -> list[d
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,  # line-buffered
-            # Grupo de proceso propio para poder matar todo el árbol con la señal.
             preexec_fn=os.setsid if hasattr(os, "setsid") else None,
         )
         assert proc.stdout is not None
@@ -394,7 +365,7 @@ def _stream_gobuster(cmd: list[str], mode: str, verbose: bool = False) -> list[d
             TextColumn("[cyan]Escaneando…[/cyan]"),
             TextColumn("[green]{task.fields[hits]}[/green] posibles hallazgos"),
             TimeElapsedColumn(),
-            console=console,
+            console=err,
             transient=True,
         ) as progress:
             task = progress.add_task("scan", hits=0)
@@ -402,15 +373,11 @@ def _stream_gobuster(cmd: list[str], mode: str, verbose: bool = False) -> list[d
                 line = line.rstrip("\n")
                 if not line.strip():
                     continue
-                if is_wildcard_precheck_error(line):
-                    # gobuster aborta: el target devuelve el mismo
-                    # status/tamaño para una URL inexistente (catch-all 403,
-                    # WAF, vhost comodín...). No es un hallazgo, es el motivo
-                    # del fracaso — se muestra igual aunque haya progress bar.
+                if scanner.is_fatal_precheck(line):
                     fatal_line = line.strip()
                     progress.console.print(f"  [bold red]![/bold red] {line}")
                     continue
-                parsed = parse_gobuster_line(line, mode)
+                parsed = scanner.parse_line(line, mode)
                 if parsed is not None:
                     results.append(parsed)
                     progress.update(task, hits=len(results))
@@ -418,34 +385,32 @@ def _stream_gobuster(cmd: list[str], mode: str, verbose: bool = False) -> list[d
                         progress.console.print(_format_hit(parsed))
         proc.wait()
     except KeyboardInterrupt:
-        console.print("\n[bold yellow][!] Ctrl+C — cortando gobuster…[/bold yellow]")
+        err.print("\n[bold yellow][!] Ctrl+C — cortando el escaneo…[/bold yellow]")
         _kill(proc)
-        console.print("[yellow][*] Proceso terminado. Resultados parciales abajo.[/yellow]")
+        err.print("[yellow][*] Proceso terminado. Resultados parciales abajo.[/yellow]")
     except FileNotFoundError:
-        # Por las dudas, aunque ensure_tool ya debería haberlo agarrado.
-        raise TargetError("gobuster no se pudo ejecutar (¿está en el PATH?).")
+        raise TargetError(f"{cmd[0]} no se pudo ejecutar (¿está en el PATH?).")
     finally:
         _kill(proc)
 
     if fatal_line is not None:
         raise TargetError(
-            "el target devuelve el mismo status/tamaño para una URL "
-            "inexistente al azar (típico de un catch-all 403, un WAF, o un "
-            "vhost comodín) — gobuster abortó el precheck de wildcard antes "
-            "de escanear en serio.\n"
-            f"    Detalle de gobuster: {fatal_line}\n"
+            "el target devuelve el mismo status/tamaño para una URL inexistente "
+            "al azar (típico de un catch-all 403, un WAF, o un vhost comodín) — "
+            "el motor abortó el precheck de wildcard antes de escanear en serio.\n"
+            f"    Detalle: {fatal_line}\n"
             "    Probá:\n"
             "      - excluir ese status con -b/--status-exclude (ej: 403,404)\n"
             "      - confirmar a mano con curl si es un WAF o el 403 es real"
         )
 
     elapsed = time.monotonic() - start
-    console.print(f"[dim]Listo en {elapsed:.1f}s — {len(results)} posibles hallazgos.[/dim]")
+    err.print(f"[dim]Listo en {elapsed:.1f}s — {len(results)} posibles hallazgos.[/dim]")
 
     returncode = proc.returncode if proc is not None else None
     if returncode not in (0, None) and not results:
-        console.print(
-            f"[yellow][~] gobuster terminó con código {returncode} y no hubo "
+        err.print(
+            f"[yellow][~] el motor terminó con código {returncode} y no hubo "
             f"hallazgos parseables — revisá el output de arriba.[/yellow]"
         )
 
@@ -474,12 +439,16 @@ def _kill(proc: Optional[subprocess.Popen]) -> None:
             pass
 
 
-def _handle_output(cfg: EnumConfig, results: list[dict], interactive: bool,
+# --------------------------------------------------------------------------- #
+# Guardado a archivo
+# --------------------------------------------------------------------------- #
+def _handle_output(cfg: EnumConfig, results: list[Finding], interactive: bool,
                    wordlist: str) -> None:
     """Guarda resultados según flags o, en modo interactivo, preguntando."""
     meta = {
         "target": cfg.target,
         "mode": cfg.mode,
+        "engine": cfg.engine,
         "level": cfg.level if not cfg.wordlist else "custom",
         "wordlist": wordlist,
         "threads": cfg.threads,
@@ -498,7 +467,5 @@ def _handle_output(cfg: EnumConfig, results: list[dict], interactive: bool,
 
         if Confirm.ask("\n¿Guardar resultados en un archivo?", default=False):
             path = Prompt.ask("  Archivo de salida", default="belphegor_out.txt")
-            fmt = Prompt.ask(
-                "  Formato", choices=["txt", "json"], default="txt"
-            )
+            fmt = Prompt.ask("  Formato", choices=["txt", "json", "jsonl"], default="txt")
             save_results(results, path, fmt, meta)

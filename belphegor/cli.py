@@ -15,6 +15,7 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 
 from . import banner, __version__
+from .engines import ENGINES
 from .preflight import check_tools, ToolMissingError, TargetError
 from .modules import enum_gobuster
 from .modules.enum_gobuster import (
@@ -90,8 +91,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     enum.add_argument("-o", "--output", help="Archivo donde guardar resultados.")
     enum.add_argument(
-        "--format", choices=["txt", "json"], default="txt",
+        "--format", choices=["txt", "json", "jsonl"], default="txt",
         help="Formato del archivo de salida (default txt).",
+    )
+    enum.add_argument(
+        "--engine", choices=ENGINES, default="gobuster",
+        help="Motor de escaneo (default gobuster).",
+    )
+    enum.add_argument(
+        "--json", action="store_true",
+        help="Emitir los hallazgos como JSONL por stdout, para pipear "
+             "(el diagnóstico va a stderr). Se activa solo también si stdout "
+             "no es una terminal.",
     )
     enum.add_argument(
         "--no-install", action="store_true",
@@ -127,6 +138,10 @@ def run_enum_from_args(args: argparse.Namespace) -> int:
         no_install=args.no_install,
         auto_filter=args.auto_filter,
         verbose=args.verbose,
+        engine=args.engine,
+        # JSONL por stdout si se pidió --json, o si stdout no es una terminal
+        # (redirección / pipe): así la salida se integra a un pipeline sola.
+        stdout_json=args.json or not sys.stdout.isatty(),
     )
     try:
         enum_gobuster.run(cfg, interactive=False)

@@ -32,3 +32,19 @@ def test_sin_subcomando_no_tiene_command():
 def test_enum_requiere_mode():
     with pytest.raises(SystemExit):
         build_parser().parse_args(["enum", "host"])  # falta -m
+
+
+def test_enum_engine_default_gobuster():
+    args = build_parser().parse_args(["enum", "host", "-m", "dir"])
+    assert args.engine == "gobuster"
+    assert args.json is False
+
+
+def test_enum_json_flag():
+    args = build_parser().parse_args(["enum", "host", "-m", "dir", "--json"])
+    assert args.json is True
+
+
+def test_enum_engine_invalido():
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["enum", "host", "-m", "dir", "--engine", "nope"])

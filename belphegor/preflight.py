@@ -27,7 +27,9 @@ except ImportError:  # pragma: no cover
 # warning de urllib3 porque abajo usamos verify=False a propósito.
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-console = Console()
+# Todo lo que imprime preflight es diagnóstico → va a stderr, para no ensuciar
+# un pipe cuando el resultado (JSONL) sale por stdout.
+console = Console(stderr=True)
 
 # Herramientas externas que puede necesitar cada módulo. Al crecer la tool,
 # se suman entradas acá y el chequeo de arranque las recorre.

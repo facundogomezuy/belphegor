@@ -65,6 +65,12 @@ la arquitectura ya está armada por módulos para sumar capacidades sin reescrib
 - 📥 **Auto-instalación consentida** — si falta gobuster, detecta tu gestor de
   paquetes y te ofrece instalarlo, mostrándote el comando exacto antes de correr
   nada. Nunca instala en silencio.
+- 🔌 **Motores intercambiables** — el fuzzing lo hace gobuster (ffuf en el
+  [roadmap](ROADMAP.md)) detrás de una interfaz común; Belphegor pone el flujo y
+  la inteligencia, no reinventa el motor.
+- 🧵 **Salida pipeable** — `--json` (o automático al redirigir/pipear) emite
+  **JSONL** por stdout para encadenar con `jq`, `httpx`, `nuclei`; todo el
+  diagnóstico va a stderr, así el pipe queda limpio.
 - 🧩 **Arquitectura modular** — pensada para sumar recon pasivo y descubrimiento
   activo como módulos nuevos.
 
@@ -164,6 +170,9 @@ belphegor enum pepito.com -m dir -L full -x php,html,bak -t 20
 
 # dir con wordlist propia (ignora el nivel)
 belphegor enum pepito.com -m dir -w /ruta/wordlist.txt
+
+# salida JSONL para encadenar con otras tools (el diagnóstico va a stderr)
+belphegor enum pepito.com -m dir --json | jq -r '.path'
 ```
 
 > 💡 Sin instalar, desde el repo: `python -m belphegor` equivale al comando
@@ -223,8 +232,10 @@ evita los errores típicos antes de disparar el escaneo:
 | `--auto-filter` | Si detecta comodín, re-corre solo excluyendo su tamaño (sin preguntar) |
 | `--protocol` | Forzar `http` / `https` |
 | `-v, --verbose` | Imprimir cada hallazgo en vivo (útil en CTF) |
+| `--engine` | Motor de escaneo: `gobuster` (ffuf en el roadmap) |
+| `--json` | Emitir JSONL por stdout, para pipear (auto si no hay terminal) |
 | `-o, --output` | Archivo de salida |
-| `--format` | `txt` o `json` |
+| `--format` | `txt`, `json` o `jsonl` |
 | `--no-install` | No ofrecer instalar herramientas faltantes (scripts/CI) |
 
 ### 🎚️ Niveles de wordlist
@@ -277,13 +288,17 @@ belphegor/                    # raíz del repo
 │   ├── __main__.py           # habilita python -m belphegor
 │   ├── cli.py                # entry point: menú + argparse
 │   ├── banner.py             # ASCII art + disclaimer
+│   ├── _console.py           # consolas stdout (resultado) / stderr (diagnóstico)
+│   ├── models.py             # Finding: hallazgo normalizado, agnóstico del motor
+│   ├── engines.py            # interfaz Scanner + GobusterScanner (backends)
 │   ├── installer.py          # auto-instalación consentida de herramientas
 │   ├── preflight.py          # chequeo de herramientas + validación de target
-│   ├── utils.py              # helpers de output/guardado
+│   ├── utils.py              # comodín + tablas + guardado (txt/json/jsonl)
 │   └── modules/
 │       ├── __init__.py
-│       └── enum_gobuster.py  # dir / vhost / dns
+│       └── enum_gobuster.py  # orquestador dir / vhost / dns
 ├── tests/                    # suite de pytest (lógica pura, sin red)
+├── ROADMAP.md                # hoja de ruta por fases
 ├── pyproject.toml            # metadata + entry point del comando `belphegor`
 ├── requirements.txt
 ├── .gitignore

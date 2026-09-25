@@ -1,76 +1,34 @@
-"""Tests de parseo de salida de gobuster y detección de comodín (lógica pura)."""
+"""Tests de detección de comodín y serialización (sobre el modelo Finding)."""
 
+import json
+
+from belphegor.models import Finding
 from belphegor.utils import (
     _status_style,
     detect_wildcard,
-    is_wildcard_precheck_error,
-    parse_gobuster_line,
+    iter_jsonl,
+    save_results,
     split_wildcard_noise,
 )
 
 
-# --------------------------------------------------------------------------- #
-# parse_gobuster_line
-# --------------------------------------------------------------------------- #
-def test_parse_dir_completo():
-    item = parse_gobuster_line("/admin (Status: 301) [Size: 313] [--> /admin/]", "dir")
-    assert item["path"] == "/admin"
-    assert item["status"] == "301"
-    assert item["size"] == "313"
+def _f(status, size, path="/x"):
+    return Finding(raw=f"{path} ({status}/{size})", path=path, status=status, size=size)
 
 
-def test_parse_dir_agrega_barra_inicial():
-    # gobuster 3.x emite "admin" sin barra; en modo dir se la devolvemos.
-    item = parse_gobuster_line("admin (Status: 200) [Size: 10]", "dir")
-    assert item["path"] == "/admin"
-
-
-def test_parse_vhost_no_agrega_barra():
-    # vhost es un hostname, no lleva barra inicial.
-    item = parse_gobuster_line("Found: panel.ejemplo.com (Status: 200) [Size: 42]", "vhost")
-    assert item["path"] == "panel.ejemplo.com"
-    assert item["status"] == "200"
-    assert item["size"] == "42"
-
-
-def test_parse_dns_found():
-    item = parse_gobuster_line("Found: api.ejemplo.com", "dns")
-    assert item["path"] == "api.ejemplo.com"
-    assert "status" not in item
-
-
-def test_parse_ruido_progreso_devuelve_none():
-    assert parse_gobuster_line("Progress: 1200 / 4600", "dir") is None
-    assert parse_gobuster_line("===============================", "dir") is None
-    assert parse_gobuster_line("[+] Wordlist: /x/y.txt", "dir") is None
-
-
-def test_parse_ruido_log_prefix_devuelve_none():
-    linea = "2026/09/24 12:00:00 the server returns a status code that matches"
-    assert parse_gobuster_line(linea, "dir") is None
-
-
-def test_parse_linea_vacia_devuelve_none():
-    assert parse_gobuster_line("   ", "dir") is None
+def _many(status, size, n, prefix="x"):
+    return [_f(status, size, f"/{prefix}{i}") for i in range(n)]
 
 
 # --------------------------------------------------------------------------- #
 # detect_wildcard / split_wildcard_noise
 # --------------------------------------------------------------------------- #
-def _res(status, size, n, prefix="x"):
-    return [{"path": f"/{prefix}{i}", "status": status, "size": size} for i in range(n)]
-
-
 def test_wildcard_pocos_resultados_no_detecta():
-    # Menos del mínimo → no clasifica aunque sean todos iguales.
-    assert detect_wildcard(_res("200", "100", 3)) is None
+    assert detect_wildcard(_many("200", "100", 3)) is None
 
 
 def test_wildcard_detecta_par_dominante():
-    res = _res("200", "359", 8) + [
-        {"path": "/code", "status": "200", "size": "354"},
-        {"path": "/start", "status": "200", "size": "681"},
-    ]
+    res = _many("200", "359", 8) + [_f("200", "354", "/code"), _f("200", "681", "/start")]
     wc = detect_wildcard(res)
     assert wc is not None
     assert wc["status"] == "200"
@@ -80,44 +38,24 @@ def test_wildcard_detecta_par_dominante():
 
 
 def test_wildcard_sin_dominante_no_detecta():
-    # 5 pares distintos, ninguno domina.
-    res = [{"path": f"/p{i}", "status": "200", "size": str(i)} for i in range(5)]
+    res = [_f("200", str(i), f"/p{i}") for i in range(5)]
     assert detect_wildcard(res) is None
 
 
 def test_split_separa_hallazgos_de_ruido():
-    res = _res("200", "359", 8) + [
-        {"path": "/code", "status": "200", "size": "354"},
-        {"path": "/start", "status": "200", "size": "681"},
-    ]
+    res = _many("200", "359", 8) + [_f("200", "354", "/code"), _f("200", "681", "/start")]
     hallazgos, ruido, wc = split_wildcard_noise(res)
     assert wc is not None
-    assert sorted(h["path"] for h in hallazgos) == ["/code", "/start"]
+    assert sorted(f.path for f in hallazgos) == ["/code", "/start"]
     assert len(ruido) == 8
 
 
 def test_split_sin_comodin_devuelve_todo_como_hallazgos():
-    res = [{"path": f"/p{i}", "status": "200", "size": str(i)} for i in range(5)]
+    res = [_f("200", str(i), f"/p{i}") for i in range(5)]
     hallazgos, ruido, wc = split_wildcard_noise(res)
     assert wc is None
     assert hallazgos == res
     assert ruido == []
-
-
-# --------------------------------------------------------------------------- #
-# is_wildcard_precheck_error
-# --------------------------------------------------------------------------- #
-def test_precheck_error_detecta():
-    assert is_wildcard_precheck_error(
-        "2026/09/24 the server returns a status code that matches the provided"
-    )
-    assert is_wildcard_precheck_error(
-        "please exclude the response length or the status code"
-    )
-
-
-def test_precheck_error_negativo():
-    assert not is_wildcard_precheck_error("/admin (Status: 200) [Size: 10]")
 
 
 # --------------------------------------------------------------------------- #
@@ -129,3 +67,35 @@ def test_status_style_por_rango():
     assert _status_style("403") == "red"
     assert _status_style("500") == "bold red"
     assert _status_style("abc") == "white"
+
+
+# --------------------------------------------------------------------------- #
+# Serialización
+# --------------------------------------------------------------------------- #
+def test_iter_jsonl_una_linea_por_finding():
+    res = [_f("200", "10", "/a"), _f("301", "0", "/b")]
+    lineas = list(iter_jsonl(res))
+    assert len(lineas) == 2
+    obj = json.loads(lineas[0])
+    assert obj["path"] == "/a"
+    assert obj["status"] == "200"
+    assert obj["source"] == "gobuster"
+
+
+def test_save_jsonl_a_archivo(tmp_path):
+    res = [_f("200", "10", "/a"), _f("301", "0", "/b")]
+    dest = tmp_path / "out.jsonl"
+    save_results(res, str(dest), fmt="jsonl")
+    lineas = dest.read_text().strip().split("\n")
+    assert len(lineas) == 2
+    assert json.loads(lineas[1])["path"] == "/b"
+
+
+def test_save_json_incluye_meta(tmp_path):
+    res = [_f("200", "10", "/a")]
+    dest = tmp_path / "out.json"
+    save_results(res, str(dest), fmt="json", meta={"target": "x"})
+    data = json.loads(dest.read_text())
+    assert data["meta"]["target"] == "x"
+    assert "generated_at" in data["meta"]
+    assert data["results"][0]["path"] == "/a"
