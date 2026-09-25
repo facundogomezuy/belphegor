@@ -36,6 +36,17 @@ def test_no_recursa_403():
     assert _looks_like_dir(f) is False
 
 
+def test_dir_por_301_sin_redirect_ffuf():
+    # ffuf no expone el destino del redirect: un 301 sin extensión = dir.
+    f = Finding(raw="x", path="/admin", status="301", source="ffuf")
+    assert _looks_like_dir(f) is True
+
+
+def test_no_dir_301_sin_redirect_con_extension():
+    f = Finding(raw="x", path="/style.css", status="301", source="ffuf")
+    assert _looks_like_dir(f) is False
+
+
 # --------------------------------------------------------------------------- #
 # _full_path / _child_base
 # --------------------------------------------------------------------------- #

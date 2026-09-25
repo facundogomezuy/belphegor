@@ -358,15 +358,22 @@ RECURSION_MAX_SCANS = 60
 def _looks_like_dir(f: Finding) -> bool:
     """True si el hallazgo parece un directorio en el que vale la pena entrar.
 
-    Señal fuerte: gobuster redirige a una ruta que termina en '/'. Señal débil:
-    un 200 sin extensión en el último segmento. No recursamos en 401/403 (suelen
-    bloquear) para no gastar escaneos al pedo.
+    - Si conocemos el destino del redirect (gobuster): es dir si termina en '/'
+      (un 301 a /index.php, por ejemplo, NO es dir).
+    - Si no lo conocemos (ffuf no lo expone): un 301/302 hacia una ruta sin
+      extensión es casi siempre un directorio sin la barra final; un 200 sin
+      extensión también.
+    No recursamos en 401/403 (suelen bloquear) para no gastar escaneos al pedo.
     """
-    if f.redirect and f.redirect.rstrip().endswith("/"):
+    last = f.path.rstrip("/").rsplit("/", 1)[-1]
+    has_ext = "." in last
+
+    if f.redirect:
+        return f.redirect.rstrip().endswith("/")
+    if f.status in ("301", "302") and last != "" and not has_ext:
         return True
-    if f.status == "200":
-        last = f.path.rstrip("/").rsplit("/", 1)[-1]
-        return last != "" and "." not in last
+    if f.status == "200" and last != "" and not has_ext:
+        return True
     return False
 
 
@@ -466,7 +473,7 @@ def _stream_scan(
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.STDOUT if scanner.merge_stderr else subprocess.DEVNULL,
             text=True,
             bufsize=1,  # line-buffered
             preexec_fn=os.setsid if hasattr(os, "setsid") else None,

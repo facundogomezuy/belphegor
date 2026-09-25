@@ -33,8 +33,16 @@ console = Console(stderr=True)
 
 # Herramientas externas que puede necesitar cada módulo. Al crecer la tool,
 # se suman entradas acá y el chequeo de arranque las recorre.
+# Herramientas que se chequean al arrancar (avisos no-fatales).
 REQUIRED_TOOLS = {
     "gobuster": "apt install gobuster · pacman -S gobuster · dnf install gobuster",
+}
+
+# Hints de instalación para cualquier herramienta que un motor pueda pedir
+# (incluye motores alternativos como ffuf, que no se chequean al arranque).
+TOOL_HINTS = {
+    "gobuster": "apt install gobuster · pacman -S gobuster · dnf install gobuster",
+    "ffuf": "apt install ffuf · pacman -S ffuf · go install github.com/ffuf/ffuf/v2@latest",
 }
 
 
@@ -88,7 +96,7 @@ def ensure_tool(tool: str, offer_install_if_missing: bool = True,
         if offer_install(tool, assume_no=no_install):
             return  # quedó instalada, seguimos
 
-    hint = REQUIRED_TOOLS.get(tool, f"instalá {tool} y volvé a intentar")
+    hint = TOOL_HINTS.get(tool, f"instalá {tool} y volvé a intentar")
     raise ToolMissingError(
         f"{tool} no está instalado y este módulo lo necesita.\n"
         f"    Instalá con: {hint}"

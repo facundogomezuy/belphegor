@@ -29,6 +29,10 @@ class Scanner(ABC):
 
     name: str = "base"    # identificador (--engine)
     tool: str = ""        # binario externo requerido en el PATH
+    # ¿mezclar stderr del motor en stdout? gobuster manda su error de precheck a
+    # stderr y lo queremos ver; ffuf manda ahí el progreso ruidoso (con \r) que
+    # ensuciaría el parseo, así que lo descarta.
+    merge_stderr: bool = True
 
     def available(self) -> bool:
         """True si el binario del motor está instalado."""
@@ -182,12 +186,90 @@ class GobusterScanner(Scanner):
 
 
 # --------------------------------------------------------------------------- #
+# ffuf
+# --------------------------------------------------------------------------- #
+def parse_ffuf_line(line: str, mode: str) -> Optional[Finding]:
+    """Parsea una línea de ffuf a Finding.
+
+    Formato de un hallazgo de ffuf (sin -s):
+        admin        [Status: 200, Size: 1234, Words: 56, Lines: 7, Duration: 12ms]
+    El banner y las líneas de progreso ('::  Progress: …') se descartan.
+    """
+    stripped = line.strip()
+    if not stripped or "[Status:" not in stripped:
+        return None
+    if stripped.startswith("::"):  # línea de progreso de ffuf
+        return None
+
+    before, _, after = stripped.partition("[Status:")
+    path = before.strip()
+    if not path:
+        return None
+
+    f = Finding(raw=stripped, source="ffuf")
+    # after = "200, Size: 1234, Words: 56, Lines: 7, Duration: 12ms]"
+    f.status = after.split(",", 1)[0].strip().rstrip("]").strip()
+    if "Size:" in after:
+        f.size = after.split("Size:", 1)[1].split(",", 1)[0].strip().rstrip("]").strip()
+
+    if mode == "dir" and path and not path.startswith(("/", "http://", "https://")):
+        path = "/" + path
+    f.path = path
+    return f
+
+
+class FfufScanner(Scanner):
+    """Backend ffuf (dir / vhost). No hace fuerza bruta de DNS (usá gobuster)."""
+
+    name = "ffuf"
+    tool = "ffuf"
+    merge_stderr = False  # el progreso de ffuf va a stderr; lo descartamos
+
+    def build_command(
+        self, cfg: "EnumConfig", wordlist: str, base_url: Optional[str] = None
+    ) -> list[str]:
+        if cfg.mode == "dns":
+            from .preflight import TargetError
+            raise TargetError(
+                "ffuf no hace fuerza bruta de DNS; usá --engine gobuster para modo dns."
+            )
+
+        assert cfg._resolved_target is not None
+        cmd: list[str] = ["ffuf", "-w", wordlist, "-t", str(cfg.threads), "-noninteractive"]
+
+        if cfg.mode == "dir":
+            base = (base_url or cfg._resolved_target.url).rstrip("/")
+            cmd += ["-u", f"{base}/FUZZ"]
+            if cfg.extensions:
+                exts = ",".join("." + e.lstrip(".") for e in cfg.extensions.split(","))
+                cmd += ["-e", exts]
+        else:  # vhost
+            host = cfg._resolved_target.host
+            cmd += ["-u", cfg._resolved_target.url, "-H", f"Host: FUZZ.{host}"]
+
+        if cfg.delay:
+            cmd += ["-p", cfg.delay]
+        if cfg.status_include:
+            cmd += ["-mc", cfg.status_include]
+        if cfg.status_exclude:
+            cmd += ["-fc", cfg.status_exclude]
+        if cfg.exclude_length:
+            cmd += ["-fs", cfg.exclude_length]
+
+        return cmd
+
+    def parse_line(self, line: str, mode: str) -> Optional[Finding]:
+        return parse_ffuf_line(line, mode)
+
+
+# --------------------------------------------------------------------------- #
 # Registro de motores
 # --------------------------------------------------------------------------- #
-ENGINES = ("gobuster",)  # ffuf en el roadmap (Fase 2)
+ENGINES = ("gobuster", "ffuf")
 
 _REGISTRY: dict[str, type[Scanner]] = {
     "gobuster": GobusterScanner,
+    "ffuf": FfufScanner,
 }
 
 
