@@ -25,7 +25,7 @@ from ..preflight import Target, build_target, ensure_tool, TargetError
 from ..utils import (
     is_wildcard_precheck_error,
     parse_gobuster_line,
-    print_results_table,
+    render_results,
     save_results,
 )
 
@@ -256,7 +256,7 @@ def run(cfg: EnumConfig, interactive: bool = False) -> list[dict]:
     results = _stream_gobuster(cmd, cfg.mode)
 
     console.print()
-    print_results_table(results, title=f"gobuster {cfg.mode} — {cfg.target}")
+    render_results(results, title=f"gobuster {cfg.mode} — {cfg.target}")
 
     # 5. Guardado.
     _handle_output(cfg, results, interactive, wordlist)

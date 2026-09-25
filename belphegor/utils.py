@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Iterable
 
@@ -11,6 +12,17 @@ from rich.console import Console
 from rich.table import Table
 
 console = Console()
+
+# Si un único par (status, size) cubre esta fracción o más de los resultados
+# con ambos campos, lo tratamos como probable respuesta comodín (WAF,
+# catch-all, fallback de SPA...). Es una heurística de patrón, no una certeza:
+# solo separamos lo que rompe el patrón de lo que lo repite.
+WILDCARD_THRESHOLD = 0.7
+
+# Con pocos resultados, "el 70% comparte status/size" no dice nada (ej: 2 de 2
+# resultados iguales no es un patrón, es casi cualquier scan chico). Por debajo
+# de este piso no nos molestamos en clasificar.
+MIN_RESULTS_FOR_WILDCARD = 5
 
 # gobuster usa el logger estándar de Go para sus mensajes fatales (p.ej. el
 # aviso de precheck de wildcard), que siempre vienen prefijados con
@@ -46,6 +58,89 @@ def print_results_table(results: list[dict], title: str = "Resultados") -> None:
         )
 
     console.print(table)
+
+
+def detect_wildcard(results: list[dict]) -> dict | None:
+    """Busca un par (status, size) dominante entre los resultados.
+
+    Solo mira los items que tienen ambos campos (dir/vhost; dns no aplica).
+    Si el par más repetido cubre >= WILDCARD_THRESHOLD de esos items, lo
+    devuelve como probable comodín: {"status", "size", "count", "total",
+    "fraction"}. Devuelve None si no hay datos suficientes o ningún par
+    domina lo bastante.
+
+    Esto es una heurística sobre el patrón de respuestas, no una certeza: no
+    hay forma de saber "cuál es el bueno" sin conocer la app. Solo señala qué
+    es sospechosamente repetitivo.
+    """
+    pairs = [
+        (item["status"], item["size"])
+        for item in results
+        if item.get("status") and item.get("size")
+    ]
+    if len(pairs) < MIN_RESULTS_FOR_WILDCARD:
+        return None
+
+    (status, size), count = Counter(pairs).most_common(1)[0]
+    fraction = count / len(pairs)
+    if fraction < WILDCARD_THRESHOLD:
+        return None
+
+    return {
+        "status": status,
+        "size": size,
+        "count": count,
+        "total": len(pairs),
+        "fraction": fraction,
+    }
+
+
+def split_wildcard_noise(
+    results: list[dict],
+) -> tuple[list[dict], list[dict], dict | None]:
+    """Separa `results` en (hallazgos, ruido, comodín) sin descartar nada.
+
+    `hallazgos` son los que rompen el patrón dominante (o todos, si no se
+    detectó comodín). `ruido` son los que matchean status y size del comodín
+    detectado (vacío si no hay comodín). `comodín` es el dict de
+    detect_wildcard, o None.
+    """
+    wildcard = detect_wildcard(results)
+    if wildcard is None:
+        return results, [], None
+
+    hallazgos: list[dict] = []
+    ruido: list[dict] = []
+    for item in results:
+        if item.get("status") == wildcard["status"] and item.get("size") == wildcard["size"]:
+            ruido.append(item)
+        else:
+            hallazgos.append(item)
+    return hallazgos, ruido, wildcard
+
+
+def render_results(results: list[dict], title: str = "Resultados") -> tuple[list[dict], list[dict], dict | None]:
+    """Muestra los resultados separando hallazgos de probable ruido comodín.
+
+    Imprime la tabla de "Hallazgos" (lo que rompe el patrón dominante, o todo
+    si no se detectó comodín) y, si corresponde, una línea colapsada con el
+    conteo de lo filtrado como comodín. No borra nada: devuelve
+    (hallazgos, ruido, comodín) para que el caller decida qué guardar o cómo
+    seguir (ver Mejora 2 — filtrado sugerido).
+    """
+    hallazgos, ruido, wildcard = split_wildcard_noise(results)
+
+    print_results_table(hallazgos, title=title)
+
+    if wildcard is not None:
+        pct = round(wildcard["fraction"] * 100)
+        console.print(
+            f"[dim]— filtrados como probable comodín: {wildcard['count']} "
+            f"con status {wildcard['status']} · size {wildcard['size']} "
+            f"({pct}% de las respuestas con status/size) —[/dim]"
+        )
+
+    return hallazgos, ruido, wildcard
 
 
 def _status_style(status: str) -> str:
