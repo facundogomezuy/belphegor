@@ -14,7 +14,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 
-from . import banner
+from . import banner, __version__
 from .preflight import check_tools, ToolMissingError, TargetError
 from .modules import enum_gobuster
 from .modules.enum_gobuster import (
@@ -32,6 +32,10 @@ def build_parser() -> argparse.ArgumentParser:
         prog="belphegor",
         description="Belphegor — recon & enumeration toolkit (bug bounty / pentest).",
         epilog="Sin argumentos entra al menú interactivo.",
+    )
+    parser.add_argument(
+        "-V", "--version", action="version",
+        version=f"belphegor {__version__}",
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -84,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-install", action="store_true",
         help="No ofrecer instalar herramientas faltantes (útil para scripts/CI).",
     )
+    enum.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Mostrar cada hallazgo en vivo, apenas aparece (útil en CTF, "
+             "donde querés reaccionar rápido). Por defecto van todos juntos a "
+             "la tabla final.",
+    )
     return parser
 
 
@@ -104,6 +114,7 @@ def run_enum_from_args(args: argparse.Namespace) -> int:
         out_format=args.format,
         no_install=args.no_install,
         auto_filter=args.auto_filter,
+        verbose=args.verbose,
     )
     try:
         enum_gobuster.run(cfg, interactive=False)
@@ -256,18 +267,20 @@ def _ask_wordlist() -> tuple[str, str | None]:
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
 
-    banner.render_banner()
-    # Chequeo de herramientas: avisa faltantes pero no corta.
-    check_tools()
-    console.print()
-
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    # Modo CLI (scripteable): nada de banner ni chequeos de arranque, para no
+    # ensuciar la salida de pipes / CI / redirecciones. ensure_tool ya valida
+    # gobuster dentro del módulo cuando hace falta.
     if args.command == "enum":
         return run_enum_from_args(args)
 
-    # Sin subcomando → menú interactivo.
+    # Sin subcomando → menú interactivo: acá sí va el banner completo y el
+    # chequeo de herramientas (avisa faltantes pero no corta).
+    banner.render_banner()
+    check_tools()
+    console.print()
     try:
         return interactive_menu()
     except KeyboardInterrupt:

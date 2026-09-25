@@ -54,8 +54,12 @@ la arquitectura ya está armada por módulos para sumar capacidades sin reescrib
   tablas, paneles y status HTTP coloreados.
 - 🧪 **Preflight inteligente** — resuelve DNS y autodetecta http/https *antes* de
   disparar el escaneo, así no te comés errores crípticos de gobuster.
-- ⚡ **Streaming en vivo** — los hallazgos aparecen a medida que llegan, no al
-  final.
+- 📊 **Salida limpia** — durante el escaneo, un spinner con el conteo de posibles
+  hallazgos y el tiempo; al terminar, una tabla ordenada. Con `-v` además imprime
+  cada hallazgo en vivo, apenas aparece (ideal para CTF).
+- 🎯 **Detección de respuesta comodín** — cuando un target responde igual a todo
+  (WAF, catch-all 403, SPA), separa los hallazgos que rompen el patrón del ruido
+  y te ofrece re-correr filtrando por tamaño (`--exclude-length`).
 - 🛡️ **Chequeo de dependencias** — avisa si falta una herramienta externa y corta
   con un mensaje claro antes de romper.
 - 📥 **Auto-instalación consentida** — si falta gobuster, detecta tu gestor de
@@ -81,8 +85,9 @@ pipx install .
 # Alternativa con pip
 pip install .
 
-# Para desarrollo (editás el código sin reinstalar)
-pip install -e .
+# Para desarrollo (editás el código sin reinstalar, + dependencias de test)
+pip install -e ".[dev]"
+pytest        # corre la suite de tests
 ```
 
 ### Dependencias externas
@@ -190,8 +195,8 @@ evita los errores típicos antes de disparar el escaneo:
 
 1. **Normaliza el target** — acepta dominio pelado (`pepito.com`), con esquema
    (`https://pepito.com`), con o sin `www`. Si ponés esquema, se respeta.
-2. **Resuelve DNS** con `socket.gethostbyname()`. Si no resuelve, corta con un
-   mensaje claro en vez de dejar que gobuster tire un error críptico.
+2. **Resuelve DNS** con `socket.getaddrinfo()` (IPv4/IPv6). Si no resuelve, corta
+   con un mensaje claro en vez de dejar que gobuster tire un error críptico.
 3. **Autodetecta el protocolo** — prueba HTTPS primero (timeout ~5s,
    `verify=False` por los certificados self-signed habituales en pentest). Si
    contesta cualquier cosa, usa https; si no, cae a http. Sigue redirects y se
@@ -210,7 +215,10 @@ evita los errores típicos antes de disparar el escaneo:
 | `--delay` | Delay entre requests (pasa a gobuster) |
 | `-x, --extensions` | Extensiones, solo modo `dir` (ej `php,html`) |
 | `-s` / `-b` | Status codes a incluir / excluir |
+| `--exclude-length` | Tamaño(s) de respuesta a excluir (filtra comodín) |
+| `--auto-filter` | Si detecta comodín, re-corre solo excluyendo su tamaño (sin preguntar) |
 | `--protocol` | Forzar `http` / `https` |
+| `-v, --verbose` | Imprimir cada hallazgo en vivo (útil en CTF) |
 | `-o, --output` | Archivo de salida |
 | `--format` | `txt` o `json` |
 | `--no-install` | No ofrecer instalar herramientas faltantes (scripts/CI) |
@@ -242,9 +250,17 @@ belphegor enum pepito.com -m dir -w /ruta/a/mi-wordlist.txt
 Si el nivel elegido no encuentra ninguna wordlist en tu sistema, te avisa cuáles
 rutas probó y te sugiere instalar SecLists o usar `-w`.
 
-La salida de gobuster se muestra **en tiempo real** (no espera al final) y
-`Ctrl+C` corta el escaneo de forma limpia sin dejar procesos colgados. Al
-terminar, los hallazgos se muestran en una tabla con color y podés guardarlos.
+Durante el escaneo se muestra un **spinner** con el conteo de posibles hallazgos
+y el tiempo transcurrido (nada de scroll infinito); al terminar, los hallazgos
+van a una **tabla con color** que separa lo que rompe el patrón del ruido comodín.
+Si preferís ver cada hallazgo **apenas aparece** —por ejemplo en un CTF, donde
+querés reaccionar rápido— pasá `-v`. `Ctrl+C` corta el escaneo de forma limpia
+sin dejar procesos colgados.
+
+```bash
+# ver cada hallazgo en vivo, y si aparece un comodín filtrarlo solo
+belphegor enum pepito.com -m dir -v --auto-filter
+```
 
 ---
 
@@ -263,6 +279,7 @@ belphegor/                    # raíz del repo
 │   └── modules/
 │       ├── __init__.py
 │       └── enum_gobuster.py  # dir / vhost / dns
+├── tests/                    # suite de pytest (lógica pura, sin red)
 ├── pyproject.toml            # metadata + entry point del comando `belphegor`
 ├── requirements.txt
 ├── .gitignore
@@ -277,6 +294,8 @@ belphegor/                    # raíz del repo
 - [ ] 🕵️ **Reconocimiento pasivo** — OSINT, subdominios pasivos, etc.
 - [ ] 📡 **Descubrimiento activo** — port scanning, fingerprinting.
 - [x] 🔎 **Enumeración de contenido** — gobuster (dir/vhost/dns).
+- [x] ✅ **Tests** — suite con `pytest` sobre parser, detección de comodín,
+  resolución de wordlist y normalización de target.
 
 ---
 

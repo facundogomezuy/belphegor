@@ -235,7 +235,13 @@ def parse_gobuster_line(line: str, mode: str) -> dict | None:
     if text.lower().startswith("found:"):
         text = text.split(":", 1)[1].strip()
 
-    item["path"] = text.split(" ")[0] if text else stripped
+    path = text.split(" ")[0] if text else stripped
+    # gobuster 3.x emite el path sin la barra inicial ("admin"); se la
+    # devolvemos en modo dir para que quede "/admin" (vhost es un hostname,
+    # no lleva barra).
+    if mode == "dir" and path and not path.startswith(("/", "http://", "https://")):
+        path = "/" + path
+    item["path"] = path
 
     if "Status:" in stripped:
         try:

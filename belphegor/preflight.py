@@ -124,41 +124,87 @@ class Target:
     ip: str
 
 
-def _extract_host(target: str) -> tuple[str, Optional[str]]:
-    """Devuelve (host, scheme_forzado_por_el_usuario).
+def _extract_host(target: str) -> tuple[str, Optional[str], str]:
+    """Devuelve (host, scheme_forzado_por_el_usuario, path).
 
-    Si el usuario ya escribió el esquema, lo respetamos y lo devolvemos como
-    segundo elemento. Si no, scheme queda en None y lo autodetectamos después.
+    - host:   netloc (host[:port]) pelado.
+    - scheme: si el usuario ya escribió el esquema, lo respetamos; si no, None
+              y lo autodetectamos después.
+    - path:   base path si el usuario lo puso (ej '/app' en host/app), para no
+              descartarlo silenciosamente en modo dir. '' si no hay.
     """
     target = target.strip()
     if "://" in target:
         parsed = urlparse(target)
-        return parsed.netloc or parsed.path, parsed.scheme.lower() or None
-    # Dominio pelado, posiblemente con path (pepito.com/algo) → nos quedamos
-    # solo con el netloc/host.
+        host = parsed.netloc or parsed.path
+        path = parsed.path if parsed.netloc else ""
+        return host, parsed.scheme.lower() or None, path
+    # Dominio pelado, posiblemente con path (pepito.com/algo).
     parsed = urlparse(f"//{target}")
-    return parsed.netloc or target, None
+    return parsed.netloc or target, None, parsed.path
+
+
+def _split_host_port(host: str) -> tuple[str, Optional[str]]:
+    """Separa host y puerto, soportando IPv6 con brackets.
+
+    Ejemplos:
+      'ejemplo.com'      -> ('ejemplo.com', None)
+      'ejemplo.com:8080' -> ('ejemplo.com', '8080')
+      '127.0.0.1:8000'   -> ('127.0.0.1', '8000')
+      '[::1]:8080'       -> ('::1', '8080')
+      '::1'              -> ('::1', None)   # IPv6 pelado, sin puerto
+    """
+    host = host.strip()
+    if host.startswith("["):  # IPv6 con brackets, con o sin puerto
+        addr, _, rest = host[1:].partition("]")
+        port = rest[1:] if rest.startswith(":") else None
+        return addr, (port or None)
+    # Más de un ':' sin brackets → IPv6 pelado (no tiene puerto separable a mano).
+    if host.count(":") > 1:
+        return host, None
+    if ":" in host:
+        h, _, p = host.partition(":")
+        return h, (p or None)
+    return host, None
 
 
 def _resolve(host: str) -> str:
-    """Resuelve DNS. Lanza TargetError si no resuelve."""
-    # gethostbyname no maneja el puerto; lo sacamos si vino pegado (host:8080).
-    hostname = host.split(":")[0]
+    """Resuelve DNS (IPv4 o IPv6). Lanza TargetError si no resuelve.
+
+    Usa getaddrinfo (no gethostbyname) para soportar IPv6 y hosts con puerto.
+    Preferimos una IPv4 cuando el host tiene ambas, por máxima compatibilidad
+    con gobuster y el resto del tooling.
+    """
+    hostname, _ = _split_host_port(host)
     try:
-        return socket.gethostbyname(hostname)
+        infos = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
         raise TargetError(
             f"no se pudo resolver «{hostname}», revisá que esté bien escrito "
             f"(¿typo?, ¿te falta el dominio completo?)"
         )
+    for family in (socket.AF_INET, socket.AF_INET6):
+        for info in infos:
+            if info[0] == family:
+                return info[4][0]
+    return infos[0][4][0]
+
+
+def _hostport_for_url(host: str) -> str:
+    """Devuelve host[:port] listo para meter en una URL, con brackets si es IPv6."""
+    addr, port = _split_host_port(host)
+    if ":" in addr and not addr.startswith("["):  # IPv6 pelado → necesita brackets
+        addr = f"[{addr}]"
+    return f"{addr}:{port}" if port else addr
 
 
 def _probe_scheme(host: str, timeout: float = 5.0) -> str:
     """Autodetecta el esquema: prueba HTTPS y cae a HTTP si no contesta.
 
-    Cualquier respuesta HTTP (incluso 401/403/404) cuenta como "el servicio
-    está ahí". Si tras un redirect el esquema final cambia, nos quedamos con
-    el final.
+    Usa HEAD (no GET) para no descargar el body: solo nos importa si el
+    servicio contesta. Cualquier respuesta HTTP (incluso 401/403/404/405)
+    cuenta como "el servicio está ahí". Si tras un redirect el esquema final
+    cambia, nos quedamos con el final.
     """
     if requests is None:
         # Sin requests no podemos probar; asumimos https como el default más
@@ -169,10 +215,11 @@ def _probe_scheme(host: str, timeout: float = 5.0) -> str:
         )
         return "https"
 
+    netloc = _hostport_for_url(host)
     for scheme in ("https", "http"):
-        url = f"{scheme}://{host}"
+        url = f"{scheme}://{netloc}"
         try:
-            resp = requests.get(
+            resp = requests.head(
                 url,
                 timeout=timeout,
                 verify=False,  # self-signed es esperable en pentesting
@@ -204,7 +251,7 @@ def build_target(target: str, force_scheme: Optional[str] = None) -> Target:
     Raises:
         TargetError: si no resuelve el DNS o el esquema forzado es inválido.
     """
-    host, user_scheme = _extract_host(target)
+    host, user_scheme, path = _extract_host(target)
     if not host:
         raise TargetError("target vacío o mal formado.")
 
@@ -222,5 +269,6 @@ def build_target(target: str, force_scheme: Optional[str] = None) -> Target:
     else:
         scheme = _probe_scheme(host)
 
-    url = urlunparse((scheme, host, "", "", "", ""))
+    # Preservamos el base path (si lo hubo) para no descartarlo en modo dir.
+    url = urlunparse((scheme, _hostport_for_url(host), path, "", "", ""))
     return Target(raw=target, host=host, scheme=scheme, url=url, ip=ip)

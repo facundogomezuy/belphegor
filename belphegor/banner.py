@@ -38,7 +38,10 @@ def render_scan_header(summary: str) -> None:
     arriba y una línea con qué se va a escanear (lo que antes iba en el título
     de la tabla). `summary` puede traer markup de rich.
     """
-    console.clear()
+    # Solo limpiamos si hay una terminal real: si la salida está redirigida a
+    # un archivo/pipe, un clear metería secuencias ANSI de basura.
+    if console.is_terminal:
+        console.clear()
     console.print(_big_name(), end="")
     console.print(Text(f"  v{VERSION}", style="dim italic"))
     console.print()

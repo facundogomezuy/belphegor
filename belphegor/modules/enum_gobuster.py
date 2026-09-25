@@ -25,6 +25,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from ..preflight import Target, build_target, ensure_tool, TargetError
 from ..utils import (
+    _status_style,
     is_wildcard_precheck_error,
     parse_gobuster_line,
     render_results,
@@ -122,6 +123,7 @@ class EnumConfig:
     out_format: str = "txt"
     no_install: bool = False              # --no-install: no ofrecer auto-instalar
     auto_filter: bool = False             # --auto-filter: re-correr solo si se detecta comodín
+    verbose: bool = False                 # -v: imprimir cada hallazgo en vivo (CTF)
     _resolved_target: Optional[Target] = field(default=None, repr=False)
 
 
@@ -272,7 +274,7 @@ def run(cfg: EnumConfig, interactive: bool = False) -> list[dict]:
     cmd = build_command(cfg, wordlist)
     console.print(f"[dim]$ {' '.join(cmd)}[/dim]\n")
 
-    results = _stream_gobuster(cmd, cfg.mode)
+    results = _stream_gobuster(cmd, cfg.mode, verbose=cfg.verbose)
 
     console.print()
     _, _, wildcard = render_results(results, title="Hallazgos")
@@ -308,7 +310,7 @@ def _handle_wildcard_filter(
 
     def _rerun() -> list[dict]:
         console.print(f"[dim]$ {suggestion}[/dim]\n")
-        new_results = _stream_gobuster(refiltered_cmd, cfg.mode)
+        new_results = _stream_gobuster(refiltered_cmd, cfg.mode, verbose=cfg.verbose)
         console.print()
         render_results(new_results, title="Hallazgos (filtrado)")
         return new_results
@@ -342,7 +344,21 @@ def _handle_wildcard_filter(
     return results
 
 
-def _stream_gobuster(cmd: list[str], mode: str) -> list[dict]:
+def _format_hit(item: dict) -> str:
+    """Formatea un hallazgo para imprimirlo en vivo (modo verbose)."""
+    path = item.get("path", item.get("raw", ""))
+    status = str(item.get("status", ""))
+    size = str(item.get("size", ""))
+    parts = [f"  [green]›[/green] [cyan]{path}[/cyan]"]
+    if status:
+        st = _status_style(status)
+        parts.append(f"[{st}]{status}[/{st}]")
+    if size:
+        parts.append(f"[dim]{size}b[/dim]")
+    return "  ".join(parts)
+
+
+def _stream_gobuster(cmd: list[str], mode: str, verbose: bool = False) -> list[dict]:
     """Corre gobuster leyendo stdout y muestra un spinner en vez de scroll infinito.
 
     NOTA TÉCNICA: gobuster (v3.8.2, --no-color, stdout no-TTY como acá) no
@@ -352,9 +368,11 @@ def _stream_gobuster(cmd: list[str], mode: str) -> list[dict]:
     spinner + cantidad de hallazgos + tiempo transcurrido, que sí podemos
     contar con certeza nosotros mismos a partir de lo que parseamos.
 
-    Los hallazgos no se imprimen uno por uno: se acumulan y van todos a la
-    tabla final (ver render_results). Maneja Ctrl+C matando el subprocess
-    para no dejar procesos colgados.
+    Por defecto los hallazgos no se imprimen uno por uno: se acumulan y van
+    todos a la tabla final (ver render_results). Con `verbose=True` (flag -v)
+    además se imprime cada hallazgo apenas aparece, por encima del spinner —
+    útil en CTF cuando querés reaccionar al toque sin esperar la tabla.
+    Maneja Ctrl+C matando el subprocess para no dejar procesos colgados.
     """
     results: list[dict] = []
     fatal_line: Optional[str] = None
@@ -396,6 +414,8 @@ def _stream_gobuster(cmd: list[str], mode: str) -> list[dict]:
                 if parsed is not None:
                     results.append(parsed)
                     progress.update(task, hits=len(results))
+                    if verbose:
+                        progress.console.print(_format_hit(parsed))
         proc.wait()
     except KeyboardInterrupt:
         console.print("\n[bold yellow][!] Ctrl+C — cortando gobuster…[/bold yellow]")
