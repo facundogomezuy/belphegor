@@ -7,7 +7,7 @@ Belphegor no reimplementa el fuzzing: orquesta motores ya probados. Cada motor
   - parsear cada línea de salida a un `Finding` normalizado,
   - reconocer su error fatal de precheck de comodín (si lo tiene).
 
-El orquestador (modules/enum_gobuster.py) es agnóstico del motor: pide un
+El orquestador (modules/enumeration.py) es agnóstico del motor: pide un
 Scanner con `get_scanner(nombre)` y trabaja siempre con `Finding`.
 """
 
@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Optional
 from .models import Finding
 
 if TYPE_CHECKING:  # solo para anotaciones; evita el ciclo de import en runtime
-    from .modules.enum_gobuster import EnumConfig
+    from .modules.enumeration import EnumConfig
 
 
 class Scanner(ABC):

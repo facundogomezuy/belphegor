@@ -1,7 +1,7 @@
 """Tests de los helpers de recursión (lógica pura, sin correr escaneos)."""
 
 from belphegor.models import Finding
-from belphegor.modules.enum_gobuster import (
+from belphegor.modules.enumeration import (
     _child_base,
     _full_path,
     _looks_like_dir,

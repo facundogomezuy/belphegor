@@ -3,8 +3,8 @@
 import pytest
 
 from belphegor.preflight import TargetError
-from belphegor.modules import enum_gobuster as eg
-from belphegor.modules.enum_gobuster import (
+from belphegor.modules import enumeration as eg
+from belphegor.modules.enumeration import (
     EnumConfig,
     count_wordlist_lines,
     find_existing_wordlist,

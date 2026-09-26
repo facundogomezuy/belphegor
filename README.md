@@ -11,7 +11,7 @@
 
 ### 🜏 Belphegor
 
-**Recon & enumeration toolkit para bug bounty y pentesting**
+**Enumeración de contenido / web fuzzing para bug bounty y pentesting**
 
 [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -28,9 +28,11 @@
 > propio). Escanear sin permiso es ilegal en la mayoría de las jurisdicciones.
 > El uso indebido corre por tu cuenta.
 
-Belphegor es una herramienta de reconocimiento y enumeración pensada para correr
-en Linux (BlackArch / Kali). Esta es la **primera etapa** de una tool más grande:
-la arquitectura ya está armada por módulos para sumar capacidades sin reescribir.
+Belphegor es una herramienta de **enumeración de contenido** (directorios, vhosts
+y subdominios) pensada para correr en Linux (BlackArch / Kali). No reinventa el
+motor de fuzzing: orquesta los que ya funcionan bien (**gobuster**, **ffuf**) y
+les suma la inteligencia y el flujo — detección de comodín, recursión y una salida
+que se integra a cualquier pipeline. Hace una cosa y la hace bien.
 
 ---
 
@@ -77,8 +79,8 @@ la arquitectura ya está armada por módulos para sumar capacidades sin reescrib
 - 🧵 **Salida pipeable** — `--json` (o automático al redirigir/pipear) emite
   **JSONL** por stdout para encadenar con `jq`, `httpx`, `nuclei`; todo el
   diagnóstico va a stderr, así el pipe queda limpio.
-- 🧩 **Arquitectura modular** — pensada para sumar recon pasivo y descubrimiento
-  activo como módulos nuevos.
+- 🧩 **Arquitectura limpia** — modelo de datos tipado y motores detrás de una
+  interfaz común (`Scanner`), fácil de extender y respaldado por tests.
 
 ---
 
@@ -140,24 +142,19 @@ belphegor enum pepito.com -m dir --no-install
 
 ## 🚀 Uso
 
-### Menú interactivo
+### Modo interactivo
+
+Corriendo `belphegor` sin argumentos entrás al modo interactivo: te va
+preguntando el objetivo, el modo (`dir`/`vhost`/`dns`), la wordlist, la
+profundidad de recursión, etc., y arranca el escaneo.
 
 ```bash
 belphegor
 ```
 
-```
-╭──────────────── Menú principal ────────────────╮
-│ 1) Reconocimiento pasivo      (próximamente)    │
-│ 2) Descubrimiento activo      (próximamente)    │
-│ 3) Enumeración de contenido   (gobuster)        │
-│ 4) Salir                                        │
-╰─────────────────────────────────────────────────╯
-```
-
-> 💡 `belphegor -v` entra al **mismo menú pero con verbose activado**: cada
-> escaneo que lances desde ahí va mostrando los hallazgos en vivo, sin tener que
-> elegir nada extra. En CLI el flag va igual: `belphegor enum pepito.com -m dir -v`.
+> 💡 `belphegor -v` entra al modo interactivo con **verbose activado**: el escaneo
+> va mostrando los hallazgos en vivo. En CLI el flag va igual:
+> `belphegor enum pepito.com -m dir -v`.
 
 ### CLI directo (scripteable)
 
@@ -311,7 +308,7 @@ belphegor/                    # raíz del repo
 │   ├── utils.py              # comodín + tablas + guardado (txt/json/jsonl)
 │   └── modules/
 │       ├── __init__.py
-│       └── enum_gobuster.py  # orquestador dir / vhost / dns
+│       └── enumeration.py    # orquestador dir / vhost / dns
 ├── tests/                    # suite de pytest (lógica pura, sin red)
 ├── ROADMAP.md                # hoja de ruta por fases
 ├── pyproject.toml            # metadata + entry point del comando `belphegor`
@@ -325,11 +322,17 @@ belphegor/                    # raíz del repo
 
 ## 🗺️ Roadmap
 
-- [ ] 🕵️ **Reconocimiento pasivo** — OSINT, subdominios pasivos, etc.
-- [ ] 📡 **Descubrimiento activo** — port scanning, fingerprinting.
-- [x] 🔎 **Enumeración de contenido** — gobuster (dir/vhost/dns).
-- [x] ✅ **Tests** — suite con `pytest` sobre parser, detección de comodín,
-  resolución de wordlist y normalización de target.
+Belphegor se enfoca en **enumeración de contenido**, sin dispersarse en otros
+dominios (para recon pasivo o port scanning ya hay herramientas dedicadas, y
+belphegor se encadena con ellas vía su salida JSONL). Detalle en
+[`ROADMAP.md`](ROADMAP.md):
+
+- [x] 🔎 **Enumeración** dir / vhost / dns.
+- [x] 🔌 **Motores intercambiables** — gobuster y ffuf.
+- [x] 🔁 **Recursión** automática en directorios.
+- [x] 🎯 **Detección/calibración de comodín** y hallazgos jugosos.
+- [x] 🧵 **Salida JSONL** pipeable + suite de tests (`pytest`).
+- [ ] 🔗 **Encadenamiento** subdominios → hosts vivos → dir.
 
 ---
 

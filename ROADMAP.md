@@ -1,7 +1,7 @@
 # 🗺️ Roadmap de Belphegor
 
 La meta: que Belphegor deje de ser "gobuster con mejor cara" y pase a ser un
-**orquestador de recon con cerebro** — el motor lo ponen gobuster/ffuf; Belphegor
+**orquestador de enumeración con cerebro** — el motor lo ponen gobuster/ffuf; Belphegor
 pone el flujo, la inteligencia sobre los resultados y una salida que se integra a
 cualquier pipeline. No competimos en velocidad de fuzzing (eso ya lo hacen bien
 las herramientas en Go): competimos en **qué hacemos con lo que encuentran**.

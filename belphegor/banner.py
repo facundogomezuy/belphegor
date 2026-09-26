@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover
 console = Console()
 
 VERSION = "0.1.0"
-TAGLINE = "Recon & enumeration toolkit · bug bounty / pentesting"
+TAGLINE = "Enumeración de contenido · web fuzzing · bug bounty / pentesting"
 
 DISCLAIMER = (
     "Esta herramienta es SOLO para uso en objetivos donde tengas autorización "

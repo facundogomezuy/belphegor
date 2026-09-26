@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "belphegor"
 version = "0.1.0"
-description = "Recon & enumeration toolkit para bug bounty y pentesting"
+description = "Enumeración de contenido / web fuzzing para bug bounty y pentesting"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Facundo Gómez" }]
-keywords = ["pentesting", "bug-bounty", "recon", "enumeration", "gobuster", "security"]
+keywords = ["pentesting", "bug-bounty", "enumeration", "content-discovery", "fuzzing", "gobuster", "ffuf", "security"]
 classifiers = [
     "Environment :: Console",
     "Intended Audience :: Information Technology",

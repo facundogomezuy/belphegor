@@ -11,14 +11,13 @@ import argparse
 import sys
 
 from rich.console import Console
-from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
 from . import banner, __version__
 from .engines import ENGINES
 from .preflight import check_tools, ToolMissingError, TargetError
-from .modules import enum_gobuster
-from .modules.enum_gobuster import (
+from .modules import enumeration
+from .modules.enumeration import (
     EnumConfig, MODES, THREADS_DEFAULT, LEVELS, DEFAULT_LEVEL, LEVEL_DESC,
 )
 
@@ -31,7 +30,7 @@ console = Console()
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="belphegor",
-        description="Belphegor — recon & enumeration toolkit (bug bounty / pentest).",
+        description="Belphegor — enumeración de contenido / web fuzzing (bug bounty / pentest).",
         epilog="Sin argumentos entra al menú interactivo.",
     )
     parser.add_argument(
@@ -160,7 +159,7 @@ def run_enum_from_args(args: argparse.Namespace) -> int:
         stdout_json=args.json or not sys.stdout.isatty(),
     )
     try:
-        enum_gobuster.run(cfg, interactive=False)
+        enumeration.run(cfg, interactive=False)
         return 0
     except (ToolMissingError, TargetError) as exc:
         console.print(f"[bold red][!] {exc}[/bold red]")
@@ -168,45 +167,15 @@ def run_enum_from_args(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
-# Menú interactivo
+# Modo interactivo
 # --------------------------------------------------------------------------- #
-MENU = """\
-[bold cyan]1[/bold cyan]) Reconocimiento pasivo      [dim](próximamente)[/dim]
-[bold cyan]2[/bold cyan]) Descubrimiento activo      [dim](próximamente)[/dim]
-[bold cyan]3[/bold cyan]) Enumeración de contenido   [green](gobuster)[/green]
-[bold cyan]4[/bold cyan]) Salir\
-"""
-
-
-def interactive_menu(verbose: bool = False) -> int:
-    while True:
-        console.print(Panel(MENU, title="[bold]Menú principal[/bold]", border_style="cyan"))
-        if verbose:
-            console.print("[dim]— modo verbose activo (-v): los hallazgos se "
-                          "muestran en vivo durante el escaneo —[/dim]")
-        choice = Prompt.ask("Elegí una opción", choices=["1", "2", "3", "4"], default="3")
-
-        if choice == "1":
-            _coming_soon("Reconocimiento pasivo")
-        elif choice == "2":
-            _coming_soon("Descubrimiento activo")
-        elif choice == "3":
-            _interactive_enum(verbose=verbose)
-        elif choice == "4":
-            console.print("[dim]Hasta la próxima.[/dim]")
-            return 0
-
-
-def _coming_soon(name: str) -> None:
-    console.print(
-        Panel(
-            f"[yellow]{name}[/yellow] todavía no está implementado.\n"
-            f"[dim]Está en el roadmap para las próximas etapas de Belphegor.[/dim]",
-            title="[bold]Próximamente[/bold]",
-            border_style="yellow",
-        )
-    )
-    console.print()
+def run_interactive(verbose: bool = False) -> int:
+    """Modo interactivo: configura y corre un escaneo de enumeración."""
+    if verbose:
+        console.print("[dim]— modo verbose activo (-v): los hallazgos se muestran "
+                      "en vivo durante el escaneo —[/dim]")
+    _interactive_enum(verbose=verbose)
+    return 0
 
 
 def _interactive_enum(verbose: bool = False) -> None:
@@ -293,7 +262,7 @@ def _interactive_enum(verbose: bool = False) -> None:
     banner.render_scan_header(summary)
 
     try:
-        enum_gobuster.run(cfg, interactive=True)
+        enumeration.run(cfg, interactive=True)
     except (ToolMissingError, TargetError) as exc:
         console.print(f"[bold red][!] {exc}[/bold red]")
     console.print()
@@ -349,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     check_tools()
     console.print()
     try:
-        return interactive_menu(verbose=args.verbose)
+        return run_interactive(verbose=args.verbose)
     except KeyboardInterrupt:
         console.print("\n[dim]Interrumpido.[/dim]")
         return 130

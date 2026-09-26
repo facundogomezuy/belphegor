@@ -11,7 +11,7 @@ from belphegor.engines import (
     parse_gobuster_line,
 )
 from belphegor.models import Finding
-from belphegor.modules.enum_gobuster import EnumConfig
+from belphegor.modules.enumeration import EnumConfig
 from belphegor.preflight import Target, TargetError
 
 
