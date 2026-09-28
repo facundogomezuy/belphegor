@@ -13,14 +13,17 @@
 
 **Content enumeration and web fuzzing for bug bounty and pentesting**
 
+[![PyPI](https://img.shields.io/pypi/v/belphegor.svg)](https://pypi.org/project/belphegor/)
 [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](#)
 ![Status](https://img.shields.io/badge/status-alpha-orange.svg)
 
-</div>
+<!-- DEMO: paste the asciinema/GIF here once recorded, e.g.
+[![asciicast](https://asciinema.org/a/XXXXXX.svg)](https://asciinema.org/a/XXXXXX)
+-->
 
-<!-- demo: add an asciinema cast or GIF here -->
+</div>
 
 ---
 
@@ -66,19 +69,23 @@ What it adds over running gobuster or ffuf directly:
 
 ## Installation
 
-Belphegor installs as a system command (`belphegor`).
+Belphegor is published on PyPI and installs as a system command (`belphegor`):
 
 ```bash
-# From PyPI (recommended: pipx keeps it isolated)
+# Recommended: pipx (isolated, keeps your system Python clean)
 pipx install belphegor
-# or
-pip install belphegor
 
-# From source
+# Or with pip
+pip install belphegor
+```
+
+### From source (development)
+
+```bash
 git clone https://github.com/facundogomezuy/belphegor.git
 cd belphegor
-pipx install .              # or: pip install .
-pip install -e ".[dev]"     # development, with test deps; then run: pytest
+pip install -e ".[dev]"
+pytest
 ```
 
 If a required external tool is missing, belphegor offers to install it through
