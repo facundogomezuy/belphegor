@@ -121,6 +121,14 @@ def test_is_interesting_ignora_el_host():
     assert is_interesting("https://dev.dom.com/.git/config") is True
 
 
+def test_save_txt_escribe_la_ruta(tmp_path):
+    res = [_f("200", "10", "/admin"), _f("301", "0", "/login")]
+    dest = tmp_path / "out.txt"
+    save_results(res, str(dest), fmt="txt")
+    cuerpo = [l for l in dest.read_text().splitlines() if not l.startswith("#")]
+    assert cuerpo == ["/admin", "/login"]
+
+
 def test_save_json_incluye_meta(tmp_path):
     res = [_f("200", "10", "/a")]
     dest = tmp_path / "out.json"

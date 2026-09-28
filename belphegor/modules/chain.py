@@ -19,7 +19,7 @@ from typing import Optional
 
 from .._console import err
 from ..models import Finding
-from ..preflight import TargetError, probe_alive
+from ..preflight import TargetError, _extract_host, probe_alive
 from ..utils import iter_jsonl, mark_interesting, print_results_table, save_results
 from . import enumeration as enum
 
@@ -65,10 +65,16 @@ def _subdomains(findings: list[Finding], domain: str) -> list[str]:
 
 def run_chain(cfg: ChainConfig, interactive: bool = False) -> list[Finding]:
     """Corre el pipeline dns → vivos → dir y devuelve los hallazgos agregados."""
+    # Normalizamos el dominio: si vino con esquema/path (http://dom/x), nos
+    # quedamos con el host pelado, para que el probe y la agregación no se rompan.
+    domain, _, _ = _extract_host(cfg.domain)
+    if not domain:
+        raise TargetError("dominio vacío o mal formado.")
+
     # --- Fase 1: subdominios por DNS -------------------------------------- #
-    err.print(f"[bold cyan]▸ Fase 1[/bold cyan] — subdominios de [bold]{cfg.domain}[/bold] (dns)")
+    err.print(f"[bold cyan]▸ Fase 1[/bold cyan] — subdominios de [bold]{domain}[/bold] (dns)")
     dns_cfg = enum.EnumConfig(
-        target=cfg.domain, mode="dns", wordlist=cfg.dns_wordlist, level=cfg.level,
+        target=domain, mode="dns", wordlist=cfg.dns_wordlist, level=cfg.level,
         threads=cfg.threads, engine="gobuster",  # ffuf no hace fuerza bruta de DNS
         no_install=cfg.no_install, verbose=cfg.verbose,
     )
@@ -77,7 +83,7 @@ def run_chain(cfg: ChainConfig, interactive: bool = False) -> list[Finding]:
     except TargetError as exc:
         err.print(f"[yellow][~] no pude enumerar subdominios: {exc}[/yellow]")
         dns_findings = []
-    subs = _subdomains(dns_findings, cfg.domain)
+    subs = _subdomains(dns_findings, domain)
     err.print(f"[dim]  {len(subs)} subdominios encontrados.[/dim]")
 
     # --- Fase 2: cuáles están vivos (incluye el dominio raíz) ------------- #
@@ -87,7 +93,7 @@ def run_chain(cfg: ChainConfig, interactive: bool = False) -> list[Finding]:
     err.print("[bold cyan]▸ Fase 2[/bold cyan] — probando cuáles están vivos (HTTP)")
     candidates: list[str] = []
     seen_hosts: set[str] = set()
-    for host in [cfg.domain] + subs:
+    for host in [domain] + subs:
         if host not in seen_hosts:
             seen_hosts.add(host)
             candidates.append(host)
@@ -138,12 +144,12 @@ def run_chain(cfg: ChainConfig, interactive: bool = False) -> list[Finding]:
     else:
         err.print()
         print_results_table(
-            all_findings, title=f"Hallazgos — {cfg.domain} ({len(alive)} hosts vivos)"
+            all_findings, title=f"Hallazgos — {domain} ({len(alive)} hosts vivos)"
         )
 
     # --- Guardado --------------------------------------------------------- #
     if cfg.output:
         save_results(all_findings, cfg.output, cfg.out_format,
-                     {"domain": cfg.domain, "hosts_vivos": len(alive), "engine": cfg.engine})
+                     {"domain": domain, "hosts_vivos": len(alive), "engine": cfg.engine})
 
     return all_findings

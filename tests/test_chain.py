@@ -66,6 +66,23 @@ def test_run_chain_respeta_max_hosts(monkeypatch):
     assert len(dir_scans) == 2
 
 
+def test_run_chain_normaliza_dominio_con_url(monkeypatch):
+    targets = []
+    monkeypatch.setattr(chain.enum, "scan",
+                        lambda cfg: (targets.append((cfg.mode, cfg.target)),
+                                     ScanResult([], None, None, False, "w"))[1])
+    probed: list[str] = []
+
+    def fake_probe(h, timeout=5.0):
+        probed.append(h)
+        return None
+    monkeypatch.setattr(chain, "probe_alive", fake_probe)
+
+    chain.run_chain(chain.ChainConfig(domain="http://dom.com/algo", stdout_json=True))
+    assert ("dns", "dom.com") in targets   # dns usa el host pelado
+    assert probed == ["dom.com"]           # el probe también
+
+
 def test_run_chain_sin_hosts_vivos(monkeypatch):
     _mock_scans(monkeypatch)
     monkeypatch.setattr(chain, "probe_alive", lambda h, timeout=5.0: None)  # ninguno vivo

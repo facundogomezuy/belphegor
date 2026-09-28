@@ -218,7 +218,9 @@ def save_results(
                 fh.write(f"# {k}: {v}\n")
             fh.write("#\n")
             for f in results:
-                fh.write(f.raw + "\n")
+                # f.path es la ruta ('/admin') o, en el encadenamiento, la URL
+                # completa; más útil que la línea cruda del motor.
+                fh.write((f.path or f.raw) + "\n")
 
     # Mensaje de guardado = diagnóstico → stderr (no ensucia un pipe).
     err.print(f"[green][+] Guardado en[/green] [bold]{path}[/bold] ({fmt})")
