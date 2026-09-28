@@ -25,6 +25,15 @@ def test_count_wordlist_lines_ignora_vacias(tmp_path):
     assert count_wordlist_lines(str(w)) == 3
 
 
+def test_count_wordlist_lines_cachea(tmp_path):
+    eg._WORDLIST_LINE_CACHE.clear()
+    w = tmp_path / "w.txt"
+    w.write_text("a\nb\nc\n")
+    assert count_wordlist_lines(str(w)) == 3
+    # quedó en la cache (misma ruta/mtime/tamaño)
+    assert any(k[0] == str(w) for k in eg._WORDLIST_LINE_CACHE)
+
+
 def test_resolve_wordlist_propia_existente(tmp_path):
     w = tmp_path / "mia.txt"
     w.write_text("x\n")

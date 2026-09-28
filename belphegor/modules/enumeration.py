@@ -166,10 +166,31 @@ def resolve_wordlist(cfg: EnumConfig) -> str:
     )
 
 
+_WORDLIST_LINE_CACHE: dict[tuple, int] = {}
+
+
 def count_wordlist_lines(path: str) -> int:
-    """Cuenta las líneas no vacías de la wordlist (solo informativo)."""
+    """Cuenta las líneas no vacías de la wordlist (solo informativo).
+
+    Cachea por (ruta, mtime, tamaño): en el encadenamiento se reusa la misma
+    wordlist en cada host, y releer un archivo de cientos de miles de líneas por
+    host sería un desperdicio. Si el archivo cambia, la clave cambia y se recuenta.
+    """
+    try:
+        st = os.stat(path)
+        key: Optional[tuple] = (path, st.st_mtime, st.st_size)
+    except OSError:
+        key = None
+
+    if key is not None and key in _WORDLIST_LINE_CACHE:
+        return _WORDLIST_LINE_CACHE[key]
+
     with open(path, encoding="utf-8", errors="ignore") as fh:
-        return sum(1 for line in fh if line.strip())
+        total = sum(1 for line in fh if line.strip())
+
+    if key is not None:
+        _WORDLIST_LINE_CACHE[key] = total
+    return total
 
 
 # --------------------------------------------------------------------------- #

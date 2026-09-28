@@ -13,6 +13,7 @@ resultado (tabla o JSONL) a stdout.
 from __future__ import annotations
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Optional
 
@@ -80,23 +81,30 @@ def run_chain(cfg: ChainConfig, interactive: bool = False) -> list[Finding]:
     err.print(f"[dim]  {len(subs)} subdominios encontrados.[/dim]")
 
     # --- Fase 2: cuáles están vivos (incluye el dominio raíz) ------------- #
+    # Se prueba en paralelo: con muchos subdominios, hacerlo en serie (cada probe
+    # con su timeout) sería carísimo. Se preserva el orden de los candidatos y se
+    # corta al llegar a --max-hosts vivos.
     err.print("[bold cyan]▸ Fase 2[/bold cyan] — probando cuáles están vivos (HTTP)")
-    alive = []
+    candidates: list[str] = []
     seen_hosts: set[str] = set()
     for host in [cfg.domain] + subs:
-        if host in seen_hosts:
-            continue
-        seen_hosts.add(host)
-        tgt = probe_alive(host)
-        if tgt is not None:
-            alive.append(tgt)
-            err.print(f"  [green]✓[/green] {tgt.scheme}://{host}")
-            if len(alive) >= cfg.max_hosts:
-                err.print(
-                    f"[yellow][~] tope de {cfg.max_hosts} hosts vivos alcanzado "
-                    f"(--max-hosts) — corto el probe.[/yellow]"
-                )
-                break
+        if host not in seen_hosts:
+            seen_hosts.add(host)
+            candidates.append(host)
+
+    alive = []
+    workers = max(1, min(cfg.threads, len(candidates)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for host, tgt in zip(candidates, pool.map(probe_alive, candidates)):
+            if tgt is not None:
+                alive.append(tgt)
+                err.print(f"  [green]✓[/green] {tgt.scheme}://{host}")
+                if len(alive) >= cfg.max_hosts:
+                    err.print(
+                        f"[yellow][~] tope de {cfg.max_hosts} hosts vivos alcanzado "
+                        f"(--max-hosts) — no fuzzeo más.[/yellow]"
+                    )
+                    break
     err.print(f"[dim]  {len(alive)} hosts vivos.[/dim]")
 
     # --- Fase 3: dir scan por host vivo ----------------------------------- #
