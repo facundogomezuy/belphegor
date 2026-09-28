@@ -9,346 +9,224 @@
                                            /_/               /____/              
 ```
 
-### 🜏 Belphegor
+### Belphegor
 
-**Enumeración de contenido / web fuzzing para bug bounty y pentesting**
+**Content enumeration and web fuzzing for bug bounty and pentesting**
 
 [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](#)
-[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#-roadmap)
+![Status](https://img.shields.io/badge/status-alpha-orange.svg)
 
 </div>
+
+<!-- demo: add an asciinema cast or GIF here -->
 
 ---
 
 > [!WARNING]
-> **Uso ético.** Belphegor es solo para objetivos donde tengas **autorización
-> explícita** (programa de bug bounty en scope, pentest contratado, laboratorio
-> propio). Escanear sin permiso es ilegal en la mayoría de las jurisdicciones.
-> El uso indebido corre por tu cuenta.
+> Ethical use only. Belphegor is for targets you are explicitly authorized to
+> test (a bug bounty program in scope, a contracted pentest, your own lab).
+> Scanning without permission is illegal in most jurisdictions. Misuse is on you.
 
-Belphegor es una herramienta de **enumeración de contenido** (directorios, vhosts
-y subdominios) pensada para correr en Linux (BlackArch / Kali). No reinventa el
-motor de fuzzing: orquesta los que ya funcionan bien (**gobuster**, **ffuf**) y
-les suma la inteligencia y el flujo — detección de comodín, recursión y una salida
-que se integra a cualquier pipeline. Hace una cosa y la hace bien.
+Belphegor is a content enumeration tool (directories, vhosts, subdomains) for
+Linux. It doesn't reimplement the fuzzing engine. It drives gobuster or ffuf and
+adds the workflow around them: preflight, wildcard handling, host chaining, and
+output you can pipe into other tools.
 
 ---
 
-## 📑 Contenido
+## Contents
 
-- [✨ Features](#-features)
-- [📦 Instalación](#-instalación)
-- [🚀 Uso](#-uso)
-- [🔎 Módulo de enumeración](#-módulo-de-enumeración-gobuster)
-- [🗂️ Estructura](#️-estructura)
-- [🗺️ Roadmap](#️-roadmap)
-- [📄 Licencia](#-licencia)
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Enumeration](#enumeration)
+- [License](#license)
 
 ---
 
-## ✨ Features
+## Features
 
-- 🖥️ **Modo dual** — menú interactivo si lo corrés pelado, o flags por CLI para
-  scriptearlo.
-- 🎨 **Salida con color** vía [`rich`](https://github.com/Textualize/rich):
-  tablas, paneles y status HTTP coloreados.
-- 🧪 **Preflight inteligente** — resuelve DNS y autodetecta http/https *antes* de
-  disparar el escaneo, así no te comés errores crípticos de gobuster.
-- 📊 **Salida limpia** — durante el escaneo, un spinner con el conteo de posibles
-  hallazgos y el tiempo; al terminar, una tabla ordenada. Con `-v` además imprime
-  cada hallazgo en vivo, apenas aparece (ideal para CTF).
-- 🎯 **Detección de respuesta comodín** — cuando un target responde igual a todo
-  (WAF, catch-all 403, SPA), separa los hallazgos que rompen el patrón del ruido
-  y te ofrece re-correr filtrando por tamaño (`--exclude-length`).
-- 🛡️ **Chequeo de dependencias** — avisa si falta una herramienta externa y corta
-  con un mensaje claro antes de romper.
-- 📥 **Auto-instalación consentida** — si falta gobuster, detecta tu gestor de
-  paquetes y te ofrece instalarlo, mostrándote el comando exacto antes de correr
-  nada. Nunca instala en silencio.
-- 🔌 **Motores intercambiables** — el fuzzing lo hace **gobuster** o **ffuf**
-  (`--engine`) detrás de una interfaz común; Belphegor pone el flujo y la
-  inteligencia, no reinventa el motor.
-- 🔁 **Recursión automática** — `-r` entra solo en los directorios que encuentra,
-  con profundidad configurable, dedup y tope de seguridad.
-- 🎯 **Auto-calibración de comodín** — `--calibrate` le pega a rutas random antes
-  de escanear; si el server tiene catch-all, excluye ese tamaño de entrada.
-- ✨ **Hallazgos jugosos** — resalta rutas de interés conocidas (`/admin`,
-  `/.git`, `.env`, backups, `api`…) con ★ en la tabla y `interesting` en el JSON.
-- 🔗 **Encadenamiento** — `belphegor chain <dominio>`: descubre subdominios (dns),
-  se queda con los hosts vivos y corre el dir scan sobre cada uno, todo en un
-  comando y con control de scope (`--max-hosts`).
-- 🧵 **Salida pipeable** — `--json` (o automático al redirigir/pipear) emite
-  **JSONL** por stdout para encadenar con `jq`, `httpx`, `nuclei`; todo el
-  diagnóstico va a stderr, así el pipe queda limpio.
-- 🧩 **Arquitectura limpia** — modelo de datos tipado y motores detrás de una
-  interfaz común (`Scanner`), fácil de extender y respaldado por tests.
+What it adds over running gobuster or ffuf directly:
+
+- Drives gobuster and ffuf behind one interface (`--engine`), so you switch
+  engines without changing how you run it.
+- Preflight resolves DNS and auto-detects http/https before the scan, so the
+  engine doesn't die on a cryptic error.
+- Detects and calibrates wildcard (catch-all) responses, so real hits are
+  separated from the noise.
+- Chains subdomains into a full scan: DNS discovery, then a liveness probe, then
+  a directory scan on each live host, in one command (`belphegor chain`).
+- Emits JSONL on stdout (diagnostics go to stderr), so you can pipe results into
+  `jq`, `httpx` or `nuclei`.
+- Flags sensitive paths in the results (`/.git`, `.env`, backups, `/admin`, …).
 
 ---
 
-## 📦 Instalación
+## Installation
 
-Belphegor se instala como **comando del sistema** (`belphegor`). No hace falta
-llamar a Python a mano.
+Belphegor installs as a system command (`belphegor`).
 
 ```bash
+# From PyPI (recommended: pipx keeps it isolated)
+pipx install belphegor
+# or
+pip install belphegor
+
+# From source
 git clone https://github.com/facundogomezuy/belphegor.git
 cd belphegor
-
-# Recomendado: pipx (queda aislado, no te ensucia el Python del sistema)
-pipx install .
-
-# Alternativa con pip
-pip install .
-
-# Para desarrollo (editás el código sin reinstalar, + dependencias de test)
-pip install -e ".[dev]"
-pytest        # corre la suite de tests
+pipx install .              # or: pip install .
+pip install -e ".[dev]"     # development, with test deps; then run: pytest
 ```
 
-### Dependencias externas
+If a required external tool is missing, belphegor offers to install it through
+your package manager. It shows the exact command first and runs it only if you
+confirm, never silently. Pass `--no-install` to skip that in scripts or CI.
 
-| Herramienta | Para qué | Instalación |
-|-------------|----------|-------------|
-| `gobuster`  | Módulo de enumeración | `apt install gobuster` · `pacman -S gobuster` |
-| `seclists`  | Wordlists por defecto | `apt install seclists` · [repo](https://github.com/danielmiessler/SecLists) |
+### External dependencies
 
-> Los defaults de wordlist apuntan a rutas de **SecLists** (`/usr/share/seclists/…`).
-> Si no lo tenés instalado, pasá tu propia wordlist con `-w`.
->
-> Las dependencias de Python (`rich`, `pyfiglet`, `requests`) se instalan solas
-> con el paquete — el `requirements.txt` está solo por comodidad; la fuente de
-> verdad es `pyproject.toml`.
+| Tool | Used for | Install |
+|------|----------|---------|
+| `gobuster` | default engine | `apt install gobuster` · `pacman -S gobuster` |
+| `ffuf` | alternative engine (`--engine ffuf`) | `apt install ffuf` · `pacman -S ffuf` |
+| `seclists` | default wordlists | `apt install seclists` · [repo](https://github.com/danielmiessler/SecLists) |
 
-### 📥 Auto-instalación de herramientas
-
-Si vas a correr un módulo y falta su herramienta externa (ej: gobuster),
-Belphegor **te ofrece instalarla** en vez de solo abandonar:
-
-1. Detecta el gestor de paquetes de tu distro (`apt` · `pacman` · `dnf` ·
-   `zypper` · `apk`).
-2. Te muestra el **comando exacto** que ejecutaría (con `sudo` solo si no sos
-   root).
-3. Instala **únicamente si confirmás** (el default es *no*).
-4. Si declinás, no hay gestor soportado, o la instalación falla → cae al mensaje
-   de instalación manual, sin romper.
-
-En entornos no interactivos (scripts, CI, cron) no pregunta nunca. Y si querés
-desactivar el ofrecimiento del todo, pasá `--no-install`:
-
-```bash
-belphegor enum pepito.com -m dir --no-install
-```
+The wordlist defaults point at SecLists paths (`/usr/share/seclists/…`). If you
+don't have it, pass your own list with `-w`. Python deps (`rich`, `pyfiglet`,
+`requests`) are installed with the package; `requirements.txt` is there for
+convenience, but `pyproject.toml` is the source of truth.
 
 ---
 
-## 🚀 Uso
+## Usage
 
-### Modo interactivo
-
-Corriendo `belphegor` sin argumentos entrás al modo interactivo: te va
-preguntando el objetivo, el modo (`dir`/`vhost`/`dns`), la wordlist, la
-profundidad de recursión, etc., y arranca el escaneo.
+Run `belphegor` with no arguments for an interactive prompt that walks you
+through a scan. For scripting, use the CLI directly:
 
 ```bash
-belphegor
-```
-
-> 💡 `belphegor -v` entra al modo interactivo con **verbose activado**: el escaneo
-> va mostrando los hallazgos en vivo. En CLI el flag va igual:
-> `belphegor enum pepito.com -m dir -v`.
-
-### CLI directo (scripteable)
-
-```bash
-# Enumeración de directorios (autodetecta http/https)
+# directory enumeration (auto-detects http/https)
 belphegor enum pepito.com -m dir
 
-# Subdominios por fuerza bruta DNS
+# subdomain brute force over DNS
 belphegor enum pepito.com -m dns
 
-# vhosts, forzando https y guardando en JSON
+# vhosts, forcing https, saving to JSON
 belphegor enum https://pepito.com -m vhost --protocol https -o out.json --format json
 
-# dir con nivel medio, extensiones y 20 hilos
+# dir with the medium list, extensions and 20 threads
 belphegor enum pepito.com -m dir -L full -x php,html,bak -t 20
 
-# dir con wordlist propia (ignora el nivel)
-belphegor enum pepito.com -m dir -w /ruta/wordlist.txt
+# dir with a custom wordlist (ignores the level)
+belphegor enum pepito.com -m dir -w /path/to/wordlist.txt
 
-# salida JSONL para encadenar con otras tools (el diagnóstico va a stderr)
+# JSONL output to pipe into other tools (diagnostics go to stderr)
 belphegor enum pepito.com -m dir --json | jq -r '.path'
 
-# recursión: entrar en cada directorio encontrado, hasta 3 niveles
+# recurse into each directory found, up to 3 levels
 belphegor enum pepito.com -m dir -r --depth 3
 
-# usar ffuf como motor, con auto-calibración de comodín
+# use ffuf as the engine, with wildcard calibration
 belphegor enum pepito.com -m dir --engine ffuf --calibrate
 
-# encadenar: subdominios → hosts vivos → dir (hasta 25 hosts), con recursión
+# chain: subdomains -> live hosts -> dir (up to 25 hosts), with recursion
 belphegor chain pepito.com -r --max-hosts 25 --json | jq -r '.path'
 ```
 
-> 💡 Sin instalar, desde el repo: `python -m belphegor` equivale al comando
-> `belphegor`.
+From a source checkout, `python -m belphegor` is equivalent to the `belphegor`
+command.
 
 ---
 
-## 🔎 Módulo de enumeración (gobuster)
+## Enumeration
 
-Envuelve gobuster en sus 3 modos (`dir`, `vhost`, `dns`) con un **preflight** que
-evita los errores típicos antes de disparar el escaneo:
+`belphegor enum` wraps gobuster/ffuf in three modes (`dir`, `vhost`, `dns`)
+behind a preflight that catches the usual mistakes before the scan starts:
 
 ```
-   input del usuario
+   user input
           │
           ▼
-  ┌─────────────────┐   ¿ya trae esquema?
-  │ 1. Normalizar   │──────────► respetarlo
-  │    dominio/URL  │
+  ┌─────────────────┐   already has scheme?
+  │ 1. Normalize    │──────────► keep it
+  │    domain/URL   │
   └────────┬────────┘
            ▼
-  ┌─────────────────┐   no resuelve → corta con
-  │ 2. Resolver DNS │──────────► mensaje claro
+  ┌─────────────────┐   no resolution → stop with
+  │ 2. Resolve DNS  │──────────► a clear message
   └────────┬────────┘
            ▼
-  ┌─────────────────┐   HTTPS ok → https
-  │ 3. Autodetectar │   timeout   → http
-  │    protocolo    │   --protocol → forzar
+  ┌─────────────────┐   HTTPS ok  → https
+  │ 3. Detect       │   timeout   → http
+  │    protocol     │   --protocol → force
   └────────┬────────┘
            ▼
-      gobuster 🚀
+       scan engine
 ```
 
-1. **Normaliza el target** — acepta dominio pelado (`pepito.com`), con esquema
-   (`https://pepito.com`), con o sin `www`. Si ponés esquema, se respeta.
-2. **Resuelve DNS** con `socket.getaddrinfo()` (IPv4/IPv6). Si no resuelve, corta
-   con un mensaje claro en vez de dejar que gobuster tire un error críptico.
-3. **Autodetecta el protocolo** — prueba HTTPS primero (timeout ~5s,
-   `verify=False` por los certificados self-signed habituales en pentest). Si
-   contesta cualquier cosa, usa https; si no, cae a http. Sigue redirects y se
-   queda con el esquema final.
-4. `--protocol http|https` fuerza el esquema y saltea la autodetección.
+1. Normalizes the target: bare domain (`pepito.com`), with scheme
+   (`https://pepito.com`), with or without `www`. If you pass a scheme, it's kept.
+2. Resolves DNS with `socket.getaddrinfo()` (IPv4/IPv6). If it doesn't resolve,
+   it stops with a clear message instead of letting the engine throw a cryptic one.
+3. Auto-detects the protocol: tries HTTPS first (~5s timeout, `verify=False` for
+   the self-signed certs common in pentests). Any response means https; otherwise
+   it falls back to http. It follows redirects and keeps the final scheme.
+4. `--protocol http|https` forces the scheme and skips detection.
 
-### Flags principales
+### Flags
 
-| Flag | Descripción |
+| Flag | Description |
 |------|-------------|
-| `target` | Dominio o URL objetivo (obligatorio) |
-| `-m, --mode` | `dir` / `vhost` / `dns` (obligatorio) |
-| `-L, --level` | Nivel de wordlist: `basic` / `full` / `deep` (default `basic`) |
-| `-w, --wordlist` | Wordlist propia (tiene prioridad sobre `--level`) |
-| `-t, --threads` | Hilos (default `10`; avisa si `> 50`) |
-| `--delay` | Delay entre requests (pasa a gobuster) |
-| `-x, --extensions` | Extensiones, solo modo `dir` (ej `php,html`) |
-| `-s` / `-b` | Status codes a incluir / excluir |
-| `--exclude-length` | Tamaño(s) de respuesta a excluir (filtra comodín) |
-| `--auto-filter` | Si detecta comodín, re-corre solo excluyendo su tamaño (sin preguntar) |
-| `--protocol` | Forzar `http` / `https` |
-| `-v, --verbose` | Imprimir cada hallazgo en vivo (útil en CTF) |
-| `-r, --recursive` | Recursar en los directorios encontrados (solo modo `dir`) |
-| `--depth` | Profundidad máxima de recursión con `-r` (default 2) |
-| `--calibrate` | Detectar catch-all/comodín antes de escanear y excluir su tamaño |
-| `--engine` | Motor de escaneo: `gobuster` o `ffuf` |
-| `--json` | Emitir JSONL por stdout, para pipear (auto si no hay terminal) |
-| `-o, --output` | Archivo de salida |
-| `--format` | `txt`, `json` o `jsonl` |
-| `--no-install` | No ofrecer instalar herramientas faltantes (scripts/CI) |
+| `target` | Target domain or URL (required) |
+| `-m, --mode` | `dir` / `vhost` / `dns` (required) |
+| `-L, --level` | Wordlist level: `basic` / `full` / `deep` (default `basic`) |
+| `-w, --wordlist` | Custom wordlist (overrides `--level`) |
+| `-t, --threads` | Threads (default `10`; warns above `50`) |
+| `--delay` | Delay between requests (passed to the engine) |
+| `-x, --extensions` | Extensions, `dir` mode only (e.g. `php,html`) |
+| `-s` / `-b` | Status codes to include / exclude |
+| `--exclude-length` | Response size(s) to exclude (filters wildcard) |
+| `--auto-filter` | On wildcard, re-run excluding its size (no prompt) |
+| `--protocol` | Force `http` / `https` |
+| `-v, --verbose` | Print each hit as it comes in |
+| `-r, --recursive` | Recurse into found directories (`dir` mode) |
+| `--depth` | Max recursion depth with `-r` (default 2) |
+| `--calibrate` | Detect a catch-all before scanning and exclude its size |
+| `--engine` | Scan engine: `gobuster` or `ffuf` |
+| `--json` | Emit JSONL on stdout, for piping (auto when stdout isn't a TTY) |
+| `-o, --output` | Output file |
+| `--format` | `txt`, `json` or `jsonl` |
+| `--no-install` | Don't offer to install missing tools (scripts/CI) |
 
-### 🎚️ Niveles de wordlist
+### Wordlist levels
 
-En vez de acordarte rutas de SecLists, elegís un **nivel** y Belphegor resuelve la
-wordlist sola. Cada nivel prueba varias rutas candidatas y usa la primera que
-exista (aguanta Kali y BlackArch, que a veces las guardan distinto):
+Instead of memorizing SecLists paths, pick a level and belphegor resolves the
+wordlist for you. Each level tries several candidate paths and uses the first one
+that exists (so it works across Kali and BlackArch, which store them differently):
 
-| Nivel | Para qué | Idea |
-|-------|----------|------|
-| `basic` *(default)* | primer vistazo, rápido | lista chica (`common.txt`) |
-| `full` | cobertura media, lo más usado en bug bounty | lista media (~directory-list medium) |
-| `deep` | exhaustivo y agresivo | lista grande (tarda y hace ruido) |
-
-```bash
-belphegor enum pepito.com -m dir -L full     # nivel medio
-belphegor enum pepito.com -m dns -L deep     # subdominios, a fondo
-```
-
-¿No usás SecLists o querés tu propia lista? Pasá `-w` y manda la tuya (tiene
-prioridad, el nivel se ignora):
+| Level | For | List |
+|-------|-----|------|
+| `basic` *(default)* | quick first pass | small (`common.txt`) |
+| `full` | medium coverage | medium (~directory-list medium) |
+| `deep` | exhaustive, aggressive | large (slow, noisy) |
 
 ```bash
-belphegor enum pepito.com -m dir -w /ruta/a/mi-wordlist.txt
+belphegor enum pepito.com -m dir -L full     # medium
+belphegor enum pepito.com -m dns -L deep     # subdomains, thorough
 ```
 
-Si el nivel elegido no encuentra ninguna wordlist en tu sistema, te avisa cuáles
-rutas probó y te sugiere instalar SecLists o usar `-w`.
-
-Durante el escaneo se muestra un **spinner** con el conteo de posibles hallazgos
-y el tiempo transcurrido (nada de scroll infinito); al terminar, los hallazgos
-van a una **tabla con color** que separa lo que rompe el patrón del ruido comodín.
-Si preferís ver cada hallazgo **apenas aparece** —por ejemplo en un CTF, donde
-querés reaccionar rápido— pasá `-v`. `Ctrl+C` corta el escaneo de forma limpia
-sin dejar procesos colgados.
+Bring your own list with `-w`; it takes priority and the level is ignored:
 
 ```bash
-# ver cada hallazgo en vivo, y si aparece un comodín filtrarlo solo
-belphegor enum pepito.com -m dir -v --auto-filter
+belphegor enum pepito.com -m dir -w /path/to/my-wordlist.txt
 ```
+
+If the chosen level finds no wordlist on your system, belphegor tells you which
+paths it tried and suggests installing SecLists or using `-w`.
 
 ---
 
-## 🗂️ Estructura
+## License
 
-```
-belphegor/                    # raíz del repo
-├── belphegor/                # el paquete
-│   ├── __init__.py
-│   ├── __main__.py           # habilita python -m belphegor
-│   ├── cli.py                # entry point: menú + argparse
-│   ├── banner.py             # ASCII art + disclaimer
-│   ├── _console.py           # consolas stdout (resultado) / stderr (diagnóstico)
-│   ├── models.py             # Finding: hallazgo normalizado, agnóstico del motor
-│   ├── engines.py            # interfaz Scanner + GobusterScanner (backends)
-│   ├── installer.py          # auto-instalación consentida de herramientas
-│   ├── preflight.py          # chequeo de herramientas + validación de target
-│   ├── utils.py              # comodín + tablas + guardado (txt/json/jsonl)
-│   └── modules/
-│       ├── __init__.py
-│       ├── enumeration.py    # orquestador dir / vhost / dns
-│       └── chain.py          # encadenamiento dns → vivos → dir
-├── tests/                    # suite de pytest (lógica pura, sin red)
-├── ROADMAP.md                # hoja de ruta por fases
-├── pyproject.toml            # metadata + entry point del comando `belphegor`
-├── requirements.txt
-├── .gitignore
-├── LICENSE
-└── README.md
-```
-
----
-
-## 🗺️ Roadmap
-
-Belphegor se enfoca en **enumeración de contenido**, sin dispersarse en otros
-dominios (para recon pasivo o port scanning ya hay herramientas dedicadas, y
-belphegor se encadena con ellas vía su salida JSONL). Detalle en
-[`ROADMAP.md`](ROADMAP.md):
-
-- [x] 🔎 **Enumeración** dir / vhost / dns.
-- [x] 🔌 **Motores intercambiables** — gobuster y ffuf.
-- [x] 🔁 **Recursión** automática en directorios.
-- [x] 🎯 **Detección/calibración de comodín** y hallazgos jugosos.
-- [x] 🧵 **Salida JSONL** pipeable + suite de tests (`pytest`).
-- [x] 🔗 **Encadenamiento** subdominios → hosts vivos → dir (`belphegor chain`).
-
----
-
-## 📄 Licencia
-
-Distribuido bajo licencia **MIT**. Ver [`LICENSE`](LICENSE) para más detalle.
-
-<div align="center">
-
-*Hecho para aprender, romper (con permiso) y aprender rompiendo.*
-
-</div>
+MIT. See [LICENSE](LICENSE).
