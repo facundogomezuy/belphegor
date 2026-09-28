@@ -12,10 +12,13 @@ license = { text = "MIT" }
 authors = [{ name = "Facundo Gómez" }]
 keywords = ["pentesting", "bug-bounty", "enumeration", "content-discovery", "fuzzing", "gobuster", "ffuf", "security"]
 classifiers = [
+    "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
     "Topic :: Security",
 ]
 dependencies = [
