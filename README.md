@@ -114,31 +114,31 @@ through a scan. For scripting, use the CLI directly:
 
 ```bash
 # directory enumeration (auto-detects http/https)
-belphegor enum pepito.com -m dir
+belphegor enum example.com -m dir
 
 # subdomain brute force over DNS
-belphegor enum pepito.com -m dns
+belphegor enum example.com -m dns
 
 # vhosts, forcing https, saving to JSON
-belphegor enum https://pepito.com -m vhost --protocol https -o out.json --format json
+belphegor enum https://example.com -m vhost --protocol https -o out.json --format json
 
 # dir with the medium list, extensions and 20 threads
-belphegor enum pepito.com -m dir -L full -x php,html,bak -t 20
+belphegor enum example.com -m dir -L full -x php,html,bak -t 20
 
 # dir with a custom wordlist (ignores the level)
-belphegor enum pepito.com -m dir -w /path/to/wordlist.txt
+belphegor enum example.com -m dir -w /path/to/wordlist.txt
 
 # JSONL output to pipe into other tools (diagnostics go to stderr)
-belphegor enum pepito.com -m dir --json | jq -r '.path'
+belphegor enum example.com -m dir --json | jq -r '.path'
 
 # recurse into each directory found, up to 3 levels
-belphegor enum pepito.com -m dir -r --depth 3
+belphegor enum example.com -m dir -r --depth 3
 
 # use ffuf as the engine, with wildcard calibration
-belphegor enum pepito.com -m dir --engine ffuf --calibrate
+belphegor enum example.com -m dir --engine ffuf --calibrate
 
 # chain: subdomains -> live hosts -> dir (up to 25 hosts), with recursion
-belphegor chain pepito.com -r --max-hosts 25 --json | jq -r '.path'
+belphegor chain example.com -r --max-hosts 25 --json | jq -r '.path'
 ```
 
 From a source checkout, `python -m belphegor` is equivalent to the `belphegor`
@@ -172,8 +172,8 @@ behind a preflight that catches the usual mistakes before the scan starts:
        scan engine
 ```
 
-1. Normalizes the target: bare domain (`pepito.com`), with scheme
-   (`https://pepito.com`), with or without `www`. If you pass a scheme, it's kept.
+1. Normalizes the target: bare domain (`example.com`), with scheme
+   (`https://example.com`), with or without `www`. If you pass a scheme, it's kept.
 2. Resolves DNS with `socket.getaddrinfo()` (IPv4/IPv6). If it doesn't resolve,
    it stops with a clear message instead of letting the engine throw a cryptic one.
 3. Auto-detects the protocol: tries HTTPS first (~5s timeout, `verify=False` for
@@ -219,14 +219,14 @@ that exists (so it works across Kali and BlackArch, which store them differently
 | `deep` | exhaustive, aggressive | large (slow, noisy) |
 
 ```bash
-belphegor enum pepito.com -m dir -L full     # medium
-belphegor enum pepito.com -m dns -L deep     # subdomains, thorough
+belphegor enum example.com -m dir -L full     # medium
+belphegor enum example.com -m dns -L deep     # subdomains, thorough
 ```
 
 Bring your own list with `-w`; it takes priority and the level is ignored:
 
 ```bash
-belphegor enum pepito.com -m dir -w /path/to/my-wordlist.txt
+belphegor enum example.com -m dir -w /path/to/my-wordlist.txt
 ```
 
 If the chosen level finds no wordlist on your system, belphegor tells you which
