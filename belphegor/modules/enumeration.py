@@ -207,8 +207,23 @@ def _calibrate(cfg: EnumConfig) -> None:
 # --------------------------------------------------------------------------- #
 # Corrida principal
 # --------------------------------------------------------------------------- #
-def run(cfg: EnumConfig, interactive: bool = False) -> list[Finding]:
-    """Ejecuta el módulo completo. Devuelve la lista de hallazgos."""
+@dataclass
+class ScanResult:
+    """Resultado crudo de un escaneo: hallazgos + contexto para presentar/reusar."""
+
+    findings: list[Finding]
+    scanner: Scanner
+    cmd: Optional[list[str]]
+    recursive: bool
+    wordlist: str
+
+
+def scan(cfg: EnumConfig) -> ScanResult:
+    """Corre un escaneo y devuelve los hallazgos, SIN presentar ni guardar.
+
+    Es la pieza reutilizable: `run()` la usa y presenta; el encadenamiento
+    (modules/chain.py) la llama por fase. Todo el diagnóstico va a stderr.
+    """
     if cfg.mode not in MODES:
         raise TargetError(f"modo inválido: «{cfg.mode}» (usá dir / vhost / dns).")
     if cfg.level not in LEVELS:
@@ -218,20 +233,15 @@ def run(cfg: EnumConfig, interactive: bool = False) -> list[Finding]:
     except ValueError as exc:
         raise TargetError(str(exc))
 
-    # 1. La herramienta del motor tiene que estar. Si falta, ensure_tool ofrece
-    #    instalarla (salvo --no-install) antes de cortar.
+    # La herramienta del motor tiene que estar (ensure_tool ofrece instalarla).
     ensure_tool(scanner.tool, no_install=cfg.no_install)
-
-    # 2. Preflight del target.
     _preflight(cfg)
 
-    # 3. Wordlist.
     wordlist = resolve_wordlist(cfg)
     origin = "propia" if cfg.wordlist else f"nivel {cfg.level}"
     total_words = count_wordlist_lines(wordlist)
     err.print(f"[dim]Wordlist ({origin}): {wordlist} — {total_words} rutas[/dim]")
 
-    # 4. Aviso por hilos altos (no corta).
     if cfg.threads > THREADS_WARN_ABOVE:
         err.print(
             f"[bold yellow]⚠️  {cfg.threads} hilos es agresivo[/bold yellow] "
@@ -239,12 +249,11 @@ def run(cfg: EnumConfig, interactive: bool = False) -> list[Finding]:
             f"martillar el target.[/yellow]"
         )
 
-    # 4.5. Auto-calibración de comodín (opcional, solo dir): si el server
-    #      responde igual a rutas random, excluimos ese tamaño de entrada.
+    # Auto-calibración de comodín (opcional, solo dir).
     if cfg.calibrate and cfg.mode == "dir" and not cfg.exclude_length:
         _calibrate(cfg)
 
-    # 5. Ejecución: recursiva (solo dir) o de una pasada.
+    # Ejecución: recursiva (solo dir) o de una pasada.
     cmd: Optional[list[str]] = None
     if cfg.recursive and cfg.mode == "dir":
         results = _run_recursive(scanner, cfg, wordlist)
@@ -257,10 +266,15 @@ def run(cfg: EnumConfig, interactive: bool = False) -> list[Finding]:
         results = _stream_scan(scanner, cmd, cfg.mode, verbose=cfg.verbose)
         recursive_run = False
 
-    # 6. Marcar hallazgos jugosos (Fase 5: inteligencia sobre resultados).
     mark_interesting(results)
+    return ScanResult(results, scanner, cmd, recursive_run, wordlist)
 
-    # 7. Presentación + manejo de comodín.
+
+def run(cfg: EnumConfig, interactive: bool = False) -> list[Finding]:
+    """Escaneo completo: scan + presentación (tabla/JSONL) + guardado."""
+    res = scan(cfg)
+    results, scanner, cmd, recursive_run = res.findings, res.scanner, res.cmd, res.recursive
+
     if cfg.stdout_json:
         _, _, wildcard = split_wildcard_noise(results)
         if wildcard is not None and cfg.auto_filter and not recursive_run:
@@ -278,9 +292,7 @@ def run(cfg: EnumConfig, interactive: bool = False) -> list[Finding]:
         elif wildcard is not None:
             _warn_wildcard(wildcard, None)
 
-    # 8. Guardado a archivo (si corresponde).
-    _handle_output(cfg, results, interactive, wordlist)
-
+    _handle_output(cfg, results, interactive, res.wordlist)
     return results
 
 

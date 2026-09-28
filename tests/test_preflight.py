@@ -143,6 +143,36 @@ def test_calibrate_respuestas_distintas(monkeypatch):
     assert preflight.calibrate_wildcard("http://host") is None
 
 
+class _FakeHead:
+    def __init__(self, url):
+        self.url = url
+
+
+def test_probe_alive_vivo(monkeypatch):
+    monkeypatch.setattr(preflight, "_resolve", lambda h: "1.2.3.4")
+    monkeypatch.setattr(preflight.requests, "head", lambda *a, **k: _FakeHead("https://host"))
+    tgt = preflight.probe_alive("host")
+    assert tgt is not None
+    assert tgt.scheme == "https"
+    assert tgt.ip == "1.2.3.4"
+
+
+def test_probe_alive_no_resuelve(monkeypatch):
+    def boom(h):
+        raise preflight.TargetError("no resuelve")
+    monkeypatch.setattr(preflight, "_resolve", boom)
+    assert preflight.probe_alive("host") is None
+
+
+def test_probe_alive_no_responde(monkeypatch):
+    monkeypatch.setattr(preflight, "_resolve", lambda h: "1.2.3.4")
+
+    def boom(*a, **k):
+        raise preflight.requests.exceptions.RequestException("timeout")
+    monkeypatch.setattr(preflight.requests, "head", boom)
+    assert preflight.probe_alive("host") is None
+
+
 def test_resolve_prefiere_ipv4(monkeypatch):
     # getaddrinfo devuelve v6 primero y v4 después; debe elegir la v4.
     fake = [

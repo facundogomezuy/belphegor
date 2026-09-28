@@ -76,6 +76,9 @@ que se integra a cualquier pipeline. Hace una cosa y la hace bien.
   de escanear; si el server tiene catch-all, excluye ese tamaño de entrada.
 - ✨ **Hallazgos jugosos** — resalta rutas de interés conocidas (`/admin`,
   `/.git`, `.env`, backups, `api`…) con ★ en la tabla y `interesting` en el JSON.
+- 🔗 **Encadenamiento** — `belphegor chain <dominio>`: descubre subdominios (dns),
+  se queda con los hosts vivos y corre el dir scan sobre cada uno, todo en un
+  comando y con control de scope (`--max-hosts`).
 - 🧵 **Salida pipeable** — `--json` (o automático al redirigir/pipear) emite
   **JSONL** por stdout para encadenar con `jq`, `httpx`, `nuclei`; todo el
   diagnóstico va a stderr, así el pipe queda limpio.
@@ -182,6 +185,9 @@ belphegor enum pepito.com -m dir -r --depth 3
 
 # usar ffuf como motor, con auto-calibración de comodín
 belphegor enum pepito.com -m dir --engine ffuf --calibrate
+
+# encadenar: subdominios → hosts vivos → dir (hasta 25 hosts), con recursión
+belphegor chain pepito.com -r --max-hosts 25 --json | jq -r '.path'
 ```
 
 > 💡 Sin instalar, desde el repo: `python -m belphegor` equivale al comando
@@ -308,7 +314,8 @@ belphegor/                    # raíz del repo
 │   ├── utils.py              # comodín + tablas + guardado (txt/json/jsonl)
 │   └── modules/
 │       ├── __init__.py
-│       └── enumeration.py    # orquestador dir / vhost / dns
+│       ├── enumeration.py    # orquestador dir / vhost / dns
+│       └── chain.py          # encadenamiento dns → vivos → dir
 ├── tests/                    # suite de pytest (lógica pura, sin red)
 ├── ROADMAP.md                # hoja de ruta por fases
 ├── pyproject.toml            # metadata + entry point del comando `belphegor`
@@ -332,7 +339,7 @@ belphegor se encadena con ellas vía su salida JSONL). Detalle en
 - [x] 🔁 **Recursión** automática en directorios.
 - [x] 🎯 **Detección/calibración de comodín** y hallazgos jugosos.
 - [x] 🧵 **Salida JSONL** pipeable + suite de tests (`pytest`).
-- [ ] 🔗 **Encadenamiento** subdominios → hosts vivos → dir.
+- [x] 🔗 **Encadenamiento** subdominios → hosts vivos → dir (`belphegor chain`).
 
 ---
 

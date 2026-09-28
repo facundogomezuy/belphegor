@@ -129,6 +129,61 @@ def build_parser() -> argparse.ArgumentParser:
              "donde querés reaccionar rápido). Por defecto van todos juntos a "
              "la tabla final.",
     )
+
+    # ---- chain (dns → vivos → dir) --------------------------------------- #
+    chain = sub.add_parser(
+        "chain",
+        help="Encadenar: subdominios (dns) → hosts vivos → enumeración de directorios.",
+    )
+    chain.add_argument("domain", help="Dominio objetivo (ej: pepito.com).")
+    chain.add_argument(
+        "-L", "--level", choices=LEVELS, default=DEFAULT_LEVEL,
+        help=f"Nivel de wordlist para ambas fases (default {DEFAULT_LEVEL}).",
+    )
+    chain.add_argument("--dns-wordlist", help="Wordlist propia para la fase dns.")
+    chain.add_argument("--dir-wordlist", help="Wordlist propia para la fase dir.")
+    chain.add_argument(
+        "-t", "--threads", type=int, default=THREADS_DEFAULT,
+        help=f"Hilos (default {THREADS_DEFAULT}).",
+    )
+    chain.add_argument(
+        "--engine", choices=ENGINES, default="gobuster",
+        help="Motor para la fase dir (dns siempre usa gobuster).",
+    )
+    chain.add_argument(
+        "-r", "--recursive", action="store_true",
+        help="Recursar en los directorios encontrados en cada host.",
+    )
+    chain.add_argument(
+        "--depth", type=int, default=2,
+        help="Profundidad máxima de recursión con -r (default 2).",
+    )
+    chain.add_argument(
+        "--calibrate", action="store_true",
+        help="Auto-calibrar comodín en cada host antes del dir scan.",
+    )
+    chain.add_argument("-x", "--extensions", help="Extensiones para la fase dir (php,html,bak).")
+    chain.add_argument(
+        "--max-hosts", type=int, default=25,
+        help="Máximo de hosts vivos a fuzzear (control de scope, default 25).",
+    )
+    chain.add_argument("-o", "--output", help="Archivo donde guardar resultados.")
+    chain.add_argument(
+        "--format", choices=["txt", "json", "jsonl"], default="txt",
+        help="Formato del archivo de salida (default txt).",
+    )
+    chain.add_argument(
+        "--json", action="store_true",
+        help="Emitir los hallazgos como JSONL por stdout (auto si no hay terminal).",
+    )
+    chain.add_argument(
+        "--no-install", action="store_true",
+        help="No ofrecer instalar herramientas faltantes (útil para scripts/CI).",
+    )
+    chain.add_argument(
+        "-v", "--verbose", action="store_true", default=argparse.SUPPRESS,
+        help="Mostrar cada hallazgo en vivo durante los dir scans.",
+    )
     return parser
 
 
@@ -166,16 +221,94 @@ def run_enum_from_args(args: argparse.Namespace) -> int:
         return 1
 
 
+def run_chain_from_args(args: argparse.Namespace) -> int:
+    from .modules import chain
+
+    cfg = chain.ChainConfig(
+        domain=args.domain,
+        level=args.level,
+        dns_wordlist=args.dns_wordlist,
+        dir_wordlist=args.dir_wordlist,
+        threads=args.threads,
+        engine=args.engine,
+        recursive=args.recursive,
+        depth=args.depth,
+        calibrate=args.calibrate,
+        extensions=args.extensions,
+        max_hosts=args.max_hosts,
+        output=args.output,
+        out_format=args.format,
+        no_install=args.no_install,
+        verbose=args.verbose,
+        stdout_json=args.json or not sys.stdout.isatty(),
+    )
+    try:
+        chain.run_chain(cfg, interactive=False)
+        return 0
+    except (ToolMissingError, TargetError) as exc:
+        console.print(f"[bold red][!] {exc}[/bold red]")
+        return 1
+
+
 # --------------------------------------------------------------------------- #
 # Modo interactivo
 # --------------------------------------------------------------------------- #
 def run_interactive(verbose: bool = False) -> int:
-    """Modo interactivo: configura y corre un escaneo de enumeración."""
+    """Modo interactivo: enumerar un target o encadenar un dominio."""
     if verbose:
         console.print("[dim]— modo verbose activo (-v): los hallazgos se muestran "
                       "en vivo durante el escaneo —[/dim]")
-    _interactive_enum(verbose=verbose)
+    console.print(
+        "\n[bold]¿Qué querés hacer?[/bold]\n"
+        "  [cyan]1[/cyan]) Enumerar un target (dir / vhost / dns)\n"
+        "  [cyan]2[/cyan]) Encadenar un dominio [dim](subdominios → hosts vivos → dir)[/dim]"
+    )
+    if Prompt.ask("Opción", choices=["1", "2"], default="1") == "2":
+        _interactive_chain(verbose=verbose)
+    else:
+        _interactive_enum(verbose=verbose)
     return 0
+
+
+def _interactive_chain(verbose: bool = False) -> None:
+    from .modules import chain
+
+    console.print()
+    domain = Prompt.ask("[bold]Dominio[/bold] (ej pepito.com)").strip()
+    if not domain:
+        console.print("[red]Dominio vacío, cancelo.[/red]\n")
+        return
+
+    console.print("\n[bold]Nivel de wordlist[/bold] (para las fases dns y dir):")
+    for i, lvl in enumerate(LEVELS, 1):
+        console.print(f"  [cyan]{i}[/cyan]) {lvl:6} [dim]— {LEVEL_DESC[lvl]}[/dim]")
+    pick = Prompt.ask("Opción", choices=[str(i) for i in range(1, len(LEVELS) + 1)], default="1")
+    level = LEVELS[int(pick) - 1]
+
+    try:
+        max_hosts = int(Prompt.ask("Máximo de hosts vivos a fuzzear", default="25").strip())
+    except ValueError:
+        max_hosts = 25
+
+    try:
+        depth = int(Prompt.ask(
+            "Profundidad recursiva en dir [dim](0 = sin recursión)[/dim]", default="0"
+        ).strip())
+    except ValueError:
+        depth = 0
+    calibrate = Confirm.ask("¿Calibrar comodín en cada host? [dim](recomendado)[/dim]", default=True)
+
+    cfg = chain.ChainConfig(
+        domain=domain, level=level, threads=THREADS_DEFAULT,
+        recursive=depth > 0, depth=depth if depth > 0 else 2,
+        calibrate=calibrate, max_hosts=max_hosts, verbose=verbose,
+    )
+    console.print()
+    try:
+        chain.run_chain(cfg, interactive=True)
+    except (ToolMissingError, TargetError) as exc:
+        console.print(f"[bold red][!] {exc}[/bold red]")
+    console.print()
 
 
 def _interactive_enum(verbose: bool = False) -> None:
@@ -311,6 +444,8 @@ def main(argv: list[str] | None = None) -> int:
     # gobuster dentro del módulo cuando hace falta.
     if args.command == "enum":
         return run_enum_from_args(args)
+    if args.command == "chain":
+        return run_chain_from_args(args)
 
     # Sin subcomando → menú interactivo: acá sí va el banner completo y el
     # chequeo de herramientas (avisa faltantes pero no corta).

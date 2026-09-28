@@ -325,3 +325,31 @@ def calibrate_wildcard(
             return None  # 404 consistente = comportamiento normal, no comodín
         return {"status": str(status), "size": str(sizes[0])}
     return None
+
+
+def probe_alive(host: str, timeout: float = 5.0) -> Optional[Target]:
+    """Devuelve un Target si `host` resuelve y responde por HTTP(S), o None.
+
+    Lo usa el encadenamiento para quedarse solo con los subdominios que tienen
+    un servidor web vivo antes de fuzzearlos. Prueba HTTPS y luego HTTP con HEAD;
+    cualquier respuesta (incluso 401/403) cuenta como vivo.
+    """
+    if requests is None:
+        return None
+    try:
+        ip = _resolve(host)
+    except TargetError:
+        return None  # no resuelve → no está vivo para nosotros
+
+    netloc = _hostport_for_url(host)
+    for scheme in ("https", "http"):
+        try:
+            resp = requests.head(
+                f"{scheme}://{netloc}", timeout=timeout, verify=False, allow_redirects=True
+            )
+            final_scheme = urlparse(resp.url).scheme.lower() or scheme
+            url = urlunparse((final_scheme, netloc, "", "", "", ""))
+            return Target(raw=host, host=host, scheme=final_scheme, url=url, ip=ip)
+        except requests.exceptions.RequestException:
+            continue
+    return None

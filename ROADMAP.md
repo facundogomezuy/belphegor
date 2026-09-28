@@ -44,14 +44,15 @@ Andamiaje que abarata todo lo demás.
 - [x] `-r/--recursive` + `--depth N`: al encontrar un directorio se re-escanea
   dentro. BFS por niveles, paths absolutos, dedup y tope de seguridad.
 
-## ⏳ Fase 4 — Encadenamiento
+## ✅ Fase 4 — Encadenamiento *(hecho)*
 
-- [ ] `subdominios → hosts vivos → dir scan` en un comando, con un probe (httpx)
-  que filtre vivos antes de fuzzear.
-- [ ] Control de scope: límites y confirmación en targets grandes.
+- [x] `belphegor chain <dominio>`: subdominios (dns) → probe de hosts vivos →
+  dir scan sobre cada uno, agregando todo con la URL completa por hallazgo.
+- [x] Control de scope con `--max-hosts`; hereda recursión, calibración y motor
+  de la fase dir.
 
-> Nota: es la fase que conviene validar contra un target real con subdominios
-> (no se puede testear a fondo en localhost), así que va después de las demás.
+> La orquestación está cubierta por tests con mocks; el pipeline completo se
+> validó end-to-end contra hosts locales (probe + dir scan reales).
 
 ## ✅ Fase 5 — Inteligencia sobre resultados *(hecho)*
 

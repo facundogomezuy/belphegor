@@ -59,3 +59,19 @@ def test_enum_recursive_y_depth():
 def test_enum_calibrate_flag():
     args = build_parser().parse_args(["enum", "host", "-m", "dir", "--calibrate"])
     assert args.calibrate is True
+
+
+def test_chain_subcommand():
+    args = build_parser().parse_args(["chain", "pepito.com", "--max-hosts", "5", "-r", "--depth", "2"])
+    assert args.command == "chain"
+    assert args.domain == "pepito.com"
+    assert args.max_hosts == 5
+    assert args.recursive is True
+    assert args.depth == 2
+
+
+def test_chain_defaults():
+    args = build_parser().parse_args(["chain", "pepito.com"])
+    assert args.engine == "gobuster"
+    assert args.max_hosts == 25
+    assert args.level == "basic"
