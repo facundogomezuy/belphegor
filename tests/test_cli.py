@@ -75,3 +75,13 @@ def test_chain_defaults():
     assert args.engine == "gobuster"
     assert args.max_hosts == 25
     assert args.level == "basic"
+
+
+def test_main_ctrl_c_sale_limpio(monkeypatch):
+    import belphegor.cli as cli
+
+    def boom(args):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(cli, "run_enum_from_args", boom)
+    # Ctrl+C durante un `enum` (CLI) debe salir con 130, sin traceback.
+    assert cli.main(["enum", "host", "-m", "dir"]) == 130

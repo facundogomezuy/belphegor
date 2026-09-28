@@ -439,22 +439,25 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    # Modo CLI (scripteable): nada de banner ni chequeos de arranque, para no
-    # ensuciar la salida de pipes / CI / redirecciones. ensure_tool ya valida
-    # gobuster dentro del módulo cuando hace falta.
-    if args.command == "enum":
-        return run_enum_from_args(args)
-    if args.command == "chain":
-        return run_chain_from_args(args)
-
-    # Sin subcomando → menú interactivo: acá sí va el banner completo y el
-    # chequeo de herramientas (avisa faltantes pero no corta).
-    banner.render_banner()
-    check_tools()
-    console.print()
     try:
+        # Modo CLI (scripteable): nada de banner ni chequeos de arranque, para no
+        # ensuciar la salida de pipes / CI / redirecciones. ensure_tool ya valida
+        # la herramienta dentro del módulo cuando hace falta.
+        if args.command == "enum":
+            return run_enum_from_args(args)
+        if args.command == "chain":
+            return run_chain_from_args(args)
+
+        # Sin subcomando → modo interactivo: acá sí va el banner completo y el
+        # chequeo de herramientas (avisa faltantes pero no corta).
+        banner.render_banner()
+        check_tools()
+        console.print()
         return run_interactive(verbose=args.verbose)
     except KeyboardInterrupt:
+        # Ctrl+C en cualquier fase (preflight, calibración, prompts…): salida
+        # limpia, sin traceback. Durante el escaneo, _stream_scan ya lo maneja
+        # devolviendo resultados parciales.
         console.print("\n[dim]Interrumpido.[/dim]")
         return 130
     except EOFError:
