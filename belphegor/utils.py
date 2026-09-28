@@ -10,6 +10,7 @@ import json
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Iterable, Iterator, Optional
+from urllib.parse import urlsplit
 
 from rich.table import Table
 
@@ -42,7 +43,15 @@ INTERESTING_PATTERNS = (
 
 
 def is_interesting(path: str) -> bool:
-    """True si la ruta matchea algún patrón jugoso conocido."""
+    """True si la ruta matchea algún patrón jugoso conocido.
+
+    Si `path` es una URL completa (como en el encadenamiento, donde cada hallazgo
+    trae la URL entera), se mira SOLO la parte de la ruta, no el host — así no se
+    marcan todos los hallazgos de, p. ej., `api.dominio.com` solo porque el host
+    contiene "api".
+    """
+    if "://" in path:
+        path = urlsplit(path).path
     low = path.lower()
     return any(p in low for p in INTERESTING_PATTERNS)
 

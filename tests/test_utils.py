@@ -113,6 +113,14 @@ def test_mark_interesting():
     assert res[1].interesting is False
 
 
+def test_is_interesting_ignora_el_host():
+    # El host contiene "api"/"admin", pero /about no es jugosa: no debe marcarse
+    # solo por el host (bug del encadenamiento, donde el path es la URL completa).
+    assert is_interesting("http://api.admin.dom.com/about") is False
+    assert is_interesting("http://api.dom.com/admin") is True
+    assert is_interesting("https://dev.dom.com/.git/config") is True
+
+
 def test_save_json_incluye_meta(tmp_path):
     res = [_f("200", "10", "/a")]
     dest = tmp_path / "out.json"
